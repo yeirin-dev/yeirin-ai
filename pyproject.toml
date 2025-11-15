@@ -71,3 +71,29 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+
+[tool.coverage.run]
+source = ["yeirin_ai"]
+omit = [
+    "*/tests/*",
+    "*/__init__.py",
+    "*/main.py",
+    "*/core/config/*",
+    "*/core/models/*",
+    "*/infrastructure/database/connection.py",
+    "*/infrastructure/database/models.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
