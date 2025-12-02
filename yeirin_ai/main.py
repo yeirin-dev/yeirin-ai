@@ -1,4 +1,4 @@
-"""FastAPI application entry point."""
+"""FastAPI 애플리케이션 진입점."""
 
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
@@ -15,32 +15,35 @@ from yeirin_ai.infrastructure.database.connection import engine
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
-    Application lifespan manager.
+    애플리케이션 생명주기 관리자.
+
+    시작 시 데이터베이스 연결을 확인하고,
+    종료 시 연결을 정리합니다.
 
     Args:
-        app: FastAPI application
+        app: FastAPI 애플리케이션 인스턴스
     """
-    # Startup: test database connection
+    # 시작: 데이터베이스 연결 테스트
     async with engine.begin() as conn:
         await conn.execute(text("SELECT 1"))
-    print("✅ Database connection established")
+    print("✅ 데이터베이스 연결 성공")
 
     yield
 
-    # Shutdown: cleanup
+    # 종료: 리소스 정리
     await engine.dispose()
-    print("👋 Database connection closed")
+    print("👋 데이터베이스 연결 종료")
 
 
-# Create FastAPI application
+# FastAPI 애플리케이션 생성
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description="Yeirin AI Recommendation Service - RAG-based counseling center matching",
+    description="Yeirin AI 추천 서비스 - RAG 기반 상담 기관 매칭",
     lifespan=lifespan,
 )
 
-# Add CORS middleware
+# CORS 미들웨어 추가
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -49,14 +52,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
+# 라우터 등록
 app.include_router(health.router, prefix=settings.api_v1_prefix)
 app.include_router(recommendations.router, prefix=settings.api_v1_prefix)
 
 
 @app.get("/")
 async def root() -> dict[str, str]:
-    """Root endpoint."""
+    """루트 엔드포인트 - 서비스 정보 반환."""
     return {
         "service": settings.app_name,
         "version": settings.app_version,

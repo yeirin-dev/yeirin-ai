@@ -1,4 +1,4 @@
-"""Health check API routes."""
+"""헬스 체크 API 라우터."""
 
 from fastapi import APIRouter
 
@@ -11,15 +11,17 @@ router = APIRouter(prefix="/health", tags=["health"])
 @router.get(
     "",
     response_model=HealthCheckResponse,
-    summary="Health check",
+    summary="헬스 체크",
     description="서비스 상태를 확인합니다.",
 )
 async def health_check() -> HealthCheckResponse:
-    """
-    Health check endpoint.
+    """헬스 체크 엔드포인트.
+
+    서비스의 상태, 버전, 이름을 반환합니다.
+    Kubernetes Liveness/Readiness 프로브에서 사용됩니다.
 
     Returns:
-        Service health status
+        서비스 상태 정보
     """
     return HealthCheckResponse(
         status="healthy",

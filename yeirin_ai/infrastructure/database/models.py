@@ -1,4 +1,8 @@
-"""Database ORM models (read-only)."""
+"""데이터베이스 ORM 모델 (읽기 전용).
+
+yeirin 메인 백엔드의 테이블 스키마를 그대로 반영합니다.
+이 서비스에서는 읽기 전용으로만 사용됩니다.
+"""
 
 from datetime import date
 
@@ -10,13 +14,17 @@ from yeirin_ai.domain.institution.models import ServiceType, SpecialTreatment, V
 
 
 class Base(DeclarativeBase):
-    """Base class for all ORM models."""
+    """모든 ORM 모델의 기본 클래스."""
 
     pass
 
 
 class VoucherInstitutionORM(Base):
-    """바우처 기관 ORM 모델 (읽기 전용)."""
+    """바우처 기관 ORM 모델 (읽기 전용).
+
+    yeirin 메인 백엔드의 voucher_institutions 테이블과 매핑됩니다.
+    camelCase 컬럼명은 NestJS TypeORM 규칙을 따릅니다.
+    """
 
     __tablename__ = "voucher_institutions"
 

@@ -1,4 +1,8 @@
-"""OpenAI client for LLM-based recommendations."""
+"""OpenAI 클라이언트 - LLM 기반 추천 시스템.
+
+GPT-4o-mini를 활용하여 상담 의뢰지를 분석하고
+최적의 바우처 상담 기관을 추천합니다.
+"""
 
 import json
 from typing import Any
@@ -11,10 +15,14 @@ from yeirin_ai.domain.recommendation.models import InstitutionRecommendation
 
 
 class OpenAIRecommendationClient:
-    """OpenAI 기반 상담 센터 추천 클라이언트."""
+    """OpenAI 기반 상담 기관 추천 클라이언트.
+
+    상담 의뢰지 텍스트와 기관 정보를 분석하여
+    의미론적 매칭을 수행합니다.
+    """
 
     def __init__(self) -> None:
-        """Initialize OpenAI client."""
+        """OpenAI 클라이언트를 초기화합니다."""
         self.client = AsyncOpenAI(api_key=settings.openai_api_key)
         self.model = settings.openai_model
         self.temperature = settings.openai_temperature
@@ -26,8 +34,7 @@ class OpenAIRecommendationClient:
         institutions: list[Institution],
         max_recommendations: int = 5,
     ) -> list[InstitutionRecommendation]:
-        """
-        Get institution recommendations using OpenAI.
+        """OpenAI를 사용하여 기관을 추천합니다.
 
         Args:
             counsel_request: 상담 의뢰지 텍스트
@@ -36,12 +43,15 @@ class OpenAIRecommendationClient:
 
         Returns:
             추천된 기관 목록 (점수 순으로 정렬됨)
+
+        Raises:
+            ValueError: OpenAI 응답이 비어있는 경우
         """
-        # Build prompt with institution context
+        # 기관 컨텍스트로 프롬프트 생성
         institutions_context = self._build_institutions_context(institutions)
         prompt = self._build_prompt(counsel_request, institutions_context, max_recommendations)
 
-        # Call OpenAI API
+        # OpenAI API 호출
         response = await self.client.chat.completions.create(
             model=self.model,
             messages=[
@@ -61,16 +71,23 @@ class OpenAIRecommendationClient:
             response_format={"type": "json_object"},
         )
 
-        # Parse response
+        # 응답 파싱
         content = response.choices[0].message.content
         if not content:
-            raise ValueError("OpenAI response is empty")
+            raise ValueError("OpenAI 응답이 비어있습니다")
 
         result = json.loads(content)
         return self._parse_recommendations(result, institutions)
 
     def _build_institutions_context(self, institutions: list[Institution]) -> str:
-        """Build institution context for prompt."""
+        """프롬프트용 기관 컨텍스트를 생성합니다.
+
+        Args:
+            institutions: 기관 목록
+
+        Returns:
+            기관 정보가 포함된 텍스트
+        """
         context_parts = []
         for idx, inst in enumerate(institutions, 1):
             context_parts.append(
@@ -98,7 +115,16 @@ class OpenAIRecommendationClient:
     def _build_prompt(
         self, counsel_request: str, institutions_context: str, max_recommendations: int
     ) -> str:
-        """Build prompt for OpenAI."""
+        """OpenAI API용 프롬프트를 생성합니다.
+
+        Args:
+            counsel_request: 상담 의뢰지 텍스트
+            institutions_context: 기관 컨텍스트
+            max_recommendations: 최대 추천 개수
+
+        Returns:
+            완성된 프롬프트 문자열
+        """
         return f"""
 다음 상담 의뢰 내용을 분석하고, 아래 기관들 중 가장 적합한 {max_recommendations}곳을 추천해주세요.
 
@@ -131,11 +157,19 @@ class OpenAIRecommendationClient:
     def _parse_recommendations(
         self, result: dict[str, Any], institutions: list[Institution]
     ) -> list[InstitutionRecommendation]:
-        """Parse OpenAI response to recommendation objects."""
-        # Create institution lookup
+        """OpenAI 응답을 추천 객체로 변환합니다.
+
+        Args:
+            result: OpenAI 응답 JSON
+            institutions: 기관 목록
+
+        Returns:
+            추천 결과 객체 목록
+        """
+        # 기관 조회용 딕셔너리 생성
         inst_lookup = {inst.id: inst for inst in institutions}
 
-        # Parse recommendations
+        # 추천 결과 파싱
         recommendations = []
         for rec in result.get("recommendations", []):
             institution_id = rec["institution_id"]
@@ -155,6 +189,6 @@ class OpenAIRecommendationClient:
                 )
             )
 
-        # Sort by score descending
+        # 점수 내림차순 정렬
         recommendations.sort(key=lambda x: x.score, reverse=True)
         return recommendations
