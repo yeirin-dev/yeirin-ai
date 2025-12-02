@@ -4,7 +4,6 @@ yeirin 메인 백엔드의 테이블 스키마를 그대로 반영합니다.
 이 서비스에서는 읽기 전용으로만 사용됩니다.
 """
 
-from datetime import date
 
 from sqlalchemy import ARRAY, Boolean, Column, Date, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import ENUM, UUID

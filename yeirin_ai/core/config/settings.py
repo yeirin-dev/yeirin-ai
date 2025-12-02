@@ -56,6 +56,19 @@ class Settings(BaseSettings):
         default=5, ge=1, le=10, description="반환할 최대 추천 기관 수"
     )
 
+    # Soul-E MSA 연동 설정
+    soul_e_webhook_url: str | None = Field(
+        default=None, description="Soul-E Webhook 콜백 URL"
+    )
+
+    # Yeirin 메인 백엔드 MSA 연동 설정
+    yeirin_backend_url: str = Field(
+        default="http://localhost:3000", description="Yeirin 메인 백엔드 URL"
+    )
+    internal_api_secret: str = Field(
+        default="yeirin-internal-secret", description="내부 서비스 간 통신용 API 키"
+    )
+
 
 # 전역 설정 인스턴스
 settings = Settings()

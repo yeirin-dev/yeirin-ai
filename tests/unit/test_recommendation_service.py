@@ -1,6 +1,6 @@
 """Service layer tests for recommendation."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -129,7 +129,7 @@ class TestRecommendationService:
         service.institution_repo.get_all = AsyncMock(return_value=[])
 
         # When & Then
-        with pytest.raises(ValueError, match="No institutions found"):
+        with pytest.raises(ValueError, match="등록된 기관이 없습니다"):
             await service.get_recommendations(request)
 
     async def test_LLM_클라이언트를_올바르게_호출한다(

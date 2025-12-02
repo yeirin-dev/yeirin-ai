@@ -3,7 +3,7 @@
 yeirin 메인 백엔드 PostgreSQL에 읽기 전용으로 연결합니다.
 """
 
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
