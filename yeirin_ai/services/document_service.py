@@ -418,7 +418,7 @@ async def _upload_pdf_to_yeirin(
     upload_url = f"{settings.yeirin_backend_url}/api/v1/upload/internal/pdf"
     logger.info(
         "[PDF_UPLOAD] yeirin 백엔드로 PDF 업로드 시작",
-        extra={"upload_url": upload_url, "filename": filename, "pdf_size": len(pdf_bytes)},
+        extra={"upload_url": upload_url, "file_name": filename, "pdf_size": len(pdf_bytes)},
     )
 
     try:
