@@ -18,6 +18,10 @@ dependencies = [
     "greenlet>=3.1.0",
     "python-dotenv>=1.0.0",
     "httpx>=0.27.0",
+    # PDF 처리
+    "pymupdf>=1.24.0",
+    "python-multipart>=0.0.20",
+    "playwright>=1.56.0",
 ]
 
 [project.optional-dependencies]
