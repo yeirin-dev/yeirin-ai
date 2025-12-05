@@ -24,12 +24,16 @@ jobs:
       - name: Add EC2 to known hosts
         run: ssh-keyscan -H ${{ env.EC2_HOST }} >> ~/.ssh/known_hosts
 
-      - name: Deploy via Git Pull, install and restart with PM2
-        env:
-          GH_DEPLOY_TOKEN: ${{ secrets.GH_DEPLOY_TOKEN }}
+      - name: Send GitHub Token to EC2
         run: |
-          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "GH_TOKEN='${GH_DEPLOY_TOKEN}' bash -s" << 'ENDSSH'
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "echo '${{ secrets.GH_DEPLOY_TOKEN }}' > /tmp/.gh_token && chmod 600 /tmp/.gh_token"
+
+      - name: Deploy via Git Pull, install and restart with PM2
+        run: |
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} << 'ENDSSH'
             set -e
+            GH_TOKEN=$(cat /tmp/.gh_token)
+            rm -f /tmp/.gh_token
 
             echo "=== Starting Yeirin-AI Backend Deployment ==="
 
