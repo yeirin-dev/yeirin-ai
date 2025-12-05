@@ -44,7 +44,7 @@ jobs:
             # Clone or pull latest code using GitHub token
             if [ -d ".git" ]; then
               echo "Pulling latest changes..."
-              git remote set-url origin "https://${GH_TOKEN}@github.com/yeirin-dev/yeirin-ai-backend.git"
+              git remote set-url origin "https://${GH_TOKEN}@github.com/yeirin-dev/yeirin-ai.git"
               git fetch origin deploy/dev
               git reset --hard origin/deploy/dev
             else
@@ -53,7 +53,7 @@ jobs:
               rm -rf /home/ec2-user/app/yeirin-ai/*
               rm -rf /home/ec2-user/app/yeirin-ai/.[!.]*
               echo "Cloning repository..."
-              git clone -b deploy/dev "https://${GH_TOKEN}@github.com/yeirin-dev/yeirin-ai-backend.git" .
+              git clone -b deploy/dev "https://${GH_TOKEN}@github.com/yeirin-dev/yeirin-ai.git" .
             fi
 
             echo "Current commit:"
