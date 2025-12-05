@@ -17,11 +17,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install uv
 RUN pip install uv
 
-# Copy dependency files
+# Copy dependency files and create empty README for build
 COPY pyproject.toml uv.lock* ./
+RUN touch README.md
 
-# Install dependencies
-RUN uv sync --frozen --no-dev
+# Install dependencies (not editable for production)
+RUN uv sync --frozen --no-dev --no-editable
 
 # Stage 2: Production
 FROM python:3.11-slim AS production
