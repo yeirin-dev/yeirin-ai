@@ -121,5 +121,5 @@ jobs:
           echo "Waiting for service to start..."
           sleep 15
           echo "Running health check..."
-          curl -f http://${{ env.EC2_HOST }}:8001/health || exit 1
+          curl -f http://${{ env.EC2_HOST }}:8001/api/v1/health || exit 1
           echo "Health check passed!"
