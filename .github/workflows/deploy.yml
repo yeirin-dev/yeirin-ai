@@ -46,6 +46,13 @@ jobs:
             echo "=== Starting Yeirin-AI Backend Deployment ==="
             cd /home/ec2-user/app/yeirin-ai
 
+            # Install Node.js if not exists (required for PM2)
+            if ! command -v node &> /dev/null; then
+              echo "Installing Node.js..."
+              curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
+              sudo dnf install -y nodejs
+            fi
+
             # Install uv if not exists
             if ! command -v uv &> /dev/null; then
               echo "Installing uv..."
