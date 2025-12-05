@@ -43,6 +43,10 @@ jobs:
               git fetch origin deploy/dev
               git reset --hard origin/deploy/dev
             else
+              # Clean up old rsync deployment if exists
+              echo "Cleaning up old deployment..."
+              rm -rf /home/ec2-user/app/yeirin-ai/*
+              rm -rf /home/ec2-user/app/yeirin-ai/.[!.]*
               echo "Cloning repository..."
               git clone -b deploy/dev "https://${GH_TOKEN}@github.com/yeirin-dev/yeirin-ai-backend.git" .
             fi
