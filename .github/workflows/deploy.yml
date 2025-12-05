@@ -25,10 +25,11 @@ jobs:
         run: ssh-keyscan -H ${{ env.EC2_HOST }} >> ~/.ssh/known_hosts
 
       - name: Deploy via Git Pull, install and restart with PM2
+        env:
+          GH_DEPLOY_TOKEN: ${{ secrets.GH_DEPLOY_TOKEN }}
         run: |
-          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "bash -s '${{ secrets.GH_DEPLOY_TOKEN }}'" << 'ENDSSH'
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "GH_TOKEN='${GH_DEPLOY_TOKEN}' bash -s" << 'ENDSSH'
             set -e
-            GH_TOKEN="$1"
 
             echo "=== Starting Yeirin-AI Backend Deployment ==="
 
