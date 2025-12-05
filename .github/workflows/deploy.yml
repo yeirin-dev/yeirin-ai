@@ -10,7 +10,6 @@ env:
   EC2_HOST: 43.203.210.136
   EC2_USER: ec2-user
   APP_DIR: /home/ec2-user/app/yeirin-ai
-  SERVICE_NAME: yeirin-ai
 
 jobs:
   deploy:
@@ -39,7 +38,7 @@ jobs:
             --exclude='.env' \
             ./ ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:${{ env.APP_DIR }}/
 
-      - name: Install dependencies and restart service
+      - name: Install dependencies and restart with PM2
         run: |
           ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} << 'ENDSSH'
             set -e
@@ -53,6 +52,12 @@ jobs:
               curl -LsSf https://astral.sh/uv/install.sh | sh
             fi
             export PATH="$HOME/.local/bin:$PATH"
+
+            # Install PM2 globally if not exists
+            if ! command -v pm2 &> /dev/null; then
+              echo "Installing PM2..."
+              sudo npm install -g pm2
+            fi
 
             # Sync dependencies
             echo "Installing dependencies..."
@@ -84,13 +89,22 @@ jobs:
 
             echo "Environment file created."
 
-            # Restart service
-            echo "Restarting service..."
-            sudo systemctl restart yeirin-ai
+            # Stop existing systemd service if running
+            sudo systemctl stop yeirin-ai 2>/dev/null || true
+            sudo systemctl disable yeirin-ai 2>/dev/null || true
+
+            # Restart with PM2
+            echo "Restarting with PM2..."
+            pm2 delete yeirin-ai 2>/dev/null || true
+            pm2 start ecosystem.config.js
+            pm2 save
+
+            # Setup PM2 startup
+            pm2 startup systemd -u ec2-user --hp /home/ec2-user 2>/dev/null || true
 
             # Wait and check status
             sleep 5
-            sudo systemctl status yeirin-ai --no-pager || true
+            pm2 status
 
             echo "=== Deployment completed! ==="
           ENDSSH
