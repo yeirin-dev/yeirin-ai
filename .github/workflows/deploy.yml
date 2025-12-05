@@ -16,9 +16,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Setup SSH
         uses: webfactory/ssh-agent@v0.9.0
         with:
@@ -27,24 +24,31 @@ jobs:
       - name: Add EC2 to known hosts
         run: ssh-keyscan -H ${{ env.EC2_HOST }} >> ~/.ssh/known_hosts
 
-      - name: Deploy code via rsync
+      - name: Deploy via Git Pull, install and restart with PM2
         run: |
-          rsync -avz --delete \
-            --exclude='.git' \
-            --exclude='.venv' \
-            --exclude='__pycache__' \
-            --exclude='.pytest_cache' \
-            --exclude='*.pyc' \
-            --exclude='.env' \
-            ./ ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:${{ env.APP_DIR }}/
-
-      - name: Install dependencies and restart with PM2
-        run: |
-          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} << 'ENDSSH'
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "bash -s '${{ secrets.GH_DEPLOY_TOKEN }}'" << 'ENDSSH'
             set -e
+            GH_TOKEN="$1"
 
             echo "=== Starting Yeirin-AI Backend Deployment ==="
+
+            # Create app directory if not exists
+            mkdir -p /home/ec2-user/app/yeirin-ai
             cd /home/ec2-user/app/yeirin-ai
+
+            # Clone or pull latest code using GitHub token
+            if [ -d ".git" ]; then
+              echo "Pulling latest changes..."
+              git remote set-url origin "https://${GH_TOKEN}@github.com/yeirin-dev/yeirin-ai-backend.git"
+              git fetch origin deploy/dev
+              git reset --hard origin/deploy/dev
+            else
+              echo "Cloning repository..."
+              git clone -b deploy/dev "https://${GH_TOKEN}@github.com/yeirin-dev/yeirin-ai-backend.git" .
+            fi
+
+            echo "Current commit:"
+            git log --oneline -1
 
             # Install Node.js if not exists (required for PM2)
             if ! command -v node &> /dev/null; then
@@ -78,23 +82,22 @@ jobs:
             echo "Loading environment from SSM Parameter Store..."
             export AWS_DEFAULT_REGION=ap-northeast-2
 
-            # Generate .env file
-            cat > .env << EOF
-          DEBUG=$(aws ssm get-parameter --name "/yeirin/dev/yeirin-ai/debug" --query "Parameter.Value" --output text)
-          PORT=$(aws ssm get-parameter --name "/yeirin/dev/yeirin-ai/port" --query "Parameter.Value" --output text)
-          LOG_LEVEL=$(aws ssm get-parameter --name "/yeirin/dev/yeirin-ai/log-level" --query "Parameter.Value" --output text)
-          APP_NAME=$(aws ssm get-parameter --name "/yeirin/dev/yeirin-ai/app-name" --query "Parameter.Value" --output text)
-          APP_VERSION=$(aws ssm get-parameter --name "/yeirin/dev/yeirin-ai/app-version" --query "Parameter.Value" --output text)
-          DATABASE_URL=$(aws ssm get-parameter --name "/yeirin/dev/yeirin-ai/database-url" --with-decryption --query "Parameter.Value" --output text)
-          OPENAI_API_KEY=$(aws ssm get-parameter --name "/yeirin/dev/common/openai-api-key" --with-decryption --query "Parameter.Value" --output text)
-          OPENAI_MODEL=$(aws ssm get-parameter --name "/yeirin/dev/yeirin-ai/openai-model" --query "Parameter.Value" --output text)
-          INTERNAL_API_SECRET=$(aws ssm get-parameter --name "/yeirin/dev/common/internal-api-secret" --with-decryption --query "Parameter.Value" --output text)
-          YEIRIN_BACKEND_URL=$(aws ssm get-parameter --name "/yeirin/dev/yeirin-ai/yeirin-backend-url" --query "Parameter.Value" --output text)
-          SOUL_E_WEBHOOK_URL=$(aws ssm get-parameter --name "/yeirin/dev/yeirin-ai/soul-e-webhook-url" --query "Parameter.Value" --output text)
-          CORS_ORIGINS=$(aws ssm get-parameter --name "/yeirin/dev/yeirin-ai/cors-origins" --query "Parameter.Value" --output text)
-          EOF
+            # Generate .env file using separate commands
+            echo "DEBUG=$(aws ssm get-parameter --name '/yeirin/dev/yeirin-ai/debug' --query 'Parameter.Value' --output text --region ap-northeast-2)" > .env
+            echo "PORT=$(aws ssm get-parameter --name '/yeirin/dev/yeirin-ai/port' --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
+            echo "LOG_LEVEL=$(aws ssm get-parameter --name '/yeirin/dev/yeirin-ai/log-level' --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
+            echo "APP_NAME=$(aws ssm get-parameter --name '/yeirin/dev/yeirin-ai/app-name' --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
+            echo "APP_VERSION=$(aws ssm get-parameter --name '/yeirin/dev/yeirin-ai/app-version' --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
+            echo "DATABASE_URL=$(aws ssm get-parameter --name '/yeirin/dev/yeirin-ai/database-url' --with-decryption --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
+            echo "OPENAI_API_KEY=$(aws ssm get-parameter --name '/yeirin/dev/common/openai-api-key' --with-decryption --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
+            echo "OPENAI_MODEL=$(aws ssm get-parameter --name '/yeirin/dev/yeirin-ai/openai-model' --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
+            echo "INTERNAL_API_SECRET=$(aws ssm get-parameter --name '/yeirin/dev/common/internal-api-secret' --with-decryption --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
+            echo "YEIRIN_BACKEND_URL=$(aws ssm get-parameter --name '/yeirin/dev/yeirin-ai/yeirin-backend-url' --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
+            echo "SOUL_E_WEBHOOK_URL=$(aws ssm get-parameter --name '/yeirin/dev/yeirin-ai/soul-e-webhook-url' --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
+            echo "CORS_ORIGINS=$(aws ssm get-parameter --name '/yeirin/dev/yeirin-ai/cors-origins' --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
 
             echo "Environment file created."
+            cat .env | head -5
 
             # Stop existing systemd service if running
             sudo systemctl stop yeirin-ai 2>/dev/null || true
@@ -112,6 +115,7 @@ jobs:
             # Wait and check status
             sleep 5
             pm2 status
+            pm2 logs yeirin-ai --lines 10 --nostream || true
 
             echo "=== Deployment completed! ==="
           ENDSSH
