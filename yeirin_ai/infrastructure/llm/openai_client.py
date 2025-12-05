@@ -47,9 +47,12 @@ class OpenAIRecommendationClient:
         Raises:
             ValueError: OpenAI 응답이 비어있는 경우
         """
+        # 실제 기관 수와 max_recommendations 중 작은 값 사용
+        actual_max = min(max_recommendations, len(institutions))
+
         # 기관 컨텍스트로 프롬프트 생성
         institutions_context = self._build_institutions_context(institutions)
-        prompt = self._build_prompt(counsel_request, institutions_context, max_recommendations)
+        prompt = self._build_prompt(counsel_request, institutions_context, actual_max)
 
         # OpenAI API 호출
         response = await self.client.chat.completions.create(
@@ -126,7 +129,7 @@ class OpenAIRecommendationClient:
             완성된 프롬프트 문자열
         """
         return f"""
-다음 상담 의뢰 내용을 분석하고, 아래 기관들 중 가장 적합한 {max_recommendations}곳을 추천해주세요.
+다음 상담 의뢰 내용을 분석하고, 아래 기관들 중 가장 적합한 기관을 추천해주세요.
 
 ## 상담 의뢰 내용:
 {counsel_request}
@@ -134,17 +137,23 @@ class OpenAIRecommendationClient:
 ## 추천 대상 기관 목록:
 {institutions_context}
 
+## 중요 규칙:
+- 반드시 위 "추천 대상 기관 목록"에 있는 기관만 추천하세요
+- 목록에 없는 기관 ID를 생성하거나 추천하면 안 됩니다
+- 같은 기관을 중복 추천하지 마세요
+- 현재 목록에 {max_recommendations}개 기관이 있으므로 최대 {max_recommendations}개까지만 추천하세요
+
 ## 요청사항:
 1. 상담 의뢰 내용의 핵심 문제와 니즈를 파악하세요
 2. 각 기관의 강점과 특성을 고려하여 적합도를 평가하세요
-3. 가장 적합한 {max_recommendations}개 기관을 선정하고 점수(0.0-1.0)를 매기세요
+3. 가장 적합한 기관을 선정하고 점수(0.0-1.0)를 매기세요
 4. 각 기관을 추천하는 구체적인 이유를 설명하세요
 
 응답은 반드시 다음 JSON 형식으로 제공해주세요:
 {{
   "recommendations": [
     {{
-      "institution_id": "기관 ID",
+      "institution_id": "위 목록에 있는 정확한 기관 ID",
       "score": 0.95,
       "reasoning": "추천 이유를 구체적으로 설명"
     }}
@@ -169,15 +178,24 @@ class OpenAIRecommendationClient:
         # 기관 조회용 딕셔너리 생성
         inst_lookup = {inst.id: inst for inst in institutions}
 
-        # 추천 결과 파싱
+        # 추천 결과 파싱 (중복 방지)
         recommendations = []
+        seen_ids: set[str] = set()
+
         for rec in result.get("recommendations", []):
             institution_id = rec["institution_id"]
+
+            # 중복 체크
+            if institution_id in seen_ids:
+                continue
+
             institution = inst_lookup.get(institution_id)
 
+            # 목록에 없는 기관 ID는 무시
             if not institution:
                 continue
 
+            seen_ids.add(institution_id)
             recommendations.append(
                 InstitutionRecommendation(
                     institution_id=institution_id,
