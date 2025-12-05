@@ -20,39 +20,37 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup SSH Key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H ${{ env.EC2_HOST }} >> ~/.ssh/known_hosts
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
 
-      - name: Deploy to EC2
+      - name: Add EC2 to known hosts
+        run: ssh-keyscan -H ${{ env.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy code via rsync
         run: |
-          ssh -i ~/.ssh/deploy_key ${{ env.EC2_USER }}@${{ env.EC2_HOST }} << 'ENDSSH'
+          rsync -avz --delete \
+            --exclude='.git' \
+            --exclude='.venv' \
+            --exclude='__pycache__' \
+            --exclude='.pytest_cache' \
+            --exclude='*.pyc' \
+            --exclude='.env' \
+            ./ ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:${{ env.APP_DIR }}/
+
+      - name: Install dependencies and restart service
+        run: |
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} << 'ENDSSH'
             set -e
 
             echo "=== Starting Yeirin-AI Backend Deployment ==="
-
-            # Navigate to app directory
-            mkdir -p $HOME/app/yeirin-ai
-            cd $HOME/app/yeirin-ai
-
-            # Clone or pull latest code
-            if [ -d ".git" ]; then
-              echo "Pulling latest changes..."
-              git fetch origin
-              git reset --hard origin/deploy/dev
-            else
-              echo "Cloning repository..."
-              git clone -b deploy/dev https://github.com/yeirin-dev/yeirin-ai.git .
-            fi
+            cd /home/ec2-user/app/yeirin-ai
 
             # Install uv if not exists
             if ! command -v uv &> /dev/null; then
               echo "Installing uv..."
               curl -LsSf https://astral.sh/uv/install.sh | sh
-              export PATH="$HOME/.local/bin:$PATH"
             fi
             export PATH="$HOME/.local/bin:$PATH"
 
