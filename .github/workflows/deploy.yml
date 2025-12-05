@@ -1,0 +1,106 @@
+name: Deploy Yeirin-AI Backend
+
+on:
+  push:
+    branches:
+      - deploy/dev
+  workflow_dispatch:
+
+env:
+  EC2_HOST: 43.203.210.136
+  EC2_USER: ec2-user
+  APP_DIR: /home/ec2-user/app/yeirin-ai
+  SERVICE_NAME: yeirin-ai
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ env.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy to EC2
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ env.EC2_USER }}@${{ env.EC2_HOST }} << 'ENDSSH'
+            set -e
+
+            echo "=== Starting Yeirin-AI Backend Deployment ==="
+
+            # Navigate to app directory
+            mkdir -p $HOME/app/yeirin-ai
+            cd $HOME/app/yeirin-ai
+
+            # Clone or pull latest code
+            if [ -d ".git" ]; then
+              echo "Pulling latest changes..."
+              git fetch origin
+              git reset --hard origin/deploy/dev
+            else
+              echo "Cloning repository..."
+              git clone -b deploy/dev https://github.com/yeirin-dev/yeirin-ai.git .
+            fi
+
+            # Install uv if not exists
+            if ! command -v uv &> /dev/null; then
+              echo "Installing uv..."
+              curl -LsSf https://astral.sh/uv/install.sh | sh
+              export PATH="$HOME/.local/bin:$PATH"
+            fi
+            export PATH="$HOME/.local/bin:$PATH"
+
+            # Sync dependencies
+            echo "Installing dependencies..."
+            uv sync --frozen
+
+            # Install Playwright browsers
+            echo "Installing Playwright browsers..."
+            uv run playwright install chromium
+
+            # Load environment from SSM and create .env
+            echo "Loading environment from SSM Parameter Store..."
+            export AWS_DEFAULT_REGION=ap-northeast-2
+
+            # Generate .env file
+            cat > .env << EOF
+          DEBUG=$(aws ssm get-parameter --name "/yeirin/dev/yeirin-ai/debug" --query "Parameter.Value" --output text)
+          PORT=$(aws ssm get-parameter --name "/yeirin/dev/yeirin-ai/port" --query "Parameter.Value" --output text)
+          LOG_LEVEL=$(aws ssm get-parameter --name "/yeirin/dev/yeirin-ai/log-level" --query "Parameter.Value" --output text)
+          APP_NAME=$(aws ssm get-parameter --name "/yeirin/dev/yeirin-ai/app-name" --query "Parameter.Value" --output text)
+          APP_VERSION=$(aws ssm get-parameter --name "/yeirin/dev/yeirin-ai/app-version" --query "Parameter.Value" --output text)
+          DATABASE_URL=$(aws ssm get-parameter --name "/yeirin/dev/yeirin-ai/database-url" --with-decryption --query "Parameter.Value" --output text)
+          OPENAI_API_KEY=$(aws ssm get-parameter --name "/yeirin/dev/common/openai-api-key" --with-decryption --query "Parameter.Value" --output text)
+          OPENAI_MODEL=$(aws ssm get-parameter --name "/yeirin/dev/yeirin-ai/openai-model" --query "Parameter.Value" --output text)
+          INTERNAL_API_SECRET=$(aws ssm get-parameter --name "/yeirin/dev/common/internal-api-secret" --with-decryption --query "Parameter.Value" --output text)
+          YEIRIN_BACKEND_URL=$(aws ssm get-parameter --name "/yeirin/dev/yeirin-ai/yeirin-backend-url" --query "Parameter.Value" --output text)
+          SOUL_E_WEBHOOK_URL=$(aws ssm get-parameter --name "/yeirin/dev/yeirin-ai/soul-e-webhook-url" --query "Parameter.Value" --output text)
+          CORS_ORIGINS=$(aws ssm get-parameter --name "/yeirin/dev/yeirin-ai/cors-origins" --query "Parameter.Value" --output text)
+          EOF
+
+            echo "Environment file created."
+
+            # Restart service
+            echo "Restarting service..."
+            sudo systemctl restart yeirin-ai
+
+            # Wait and check status
+            sleep 5
+            sudo systemctl status yeirin-ai --no-pager || true
+
+            echo "=== Deployment completed! ==="
+          ENDSSH
+
+      - name: Health Check
+        run: |
+          echo "Waiting for service to start..."
+          sleep 15
+          echo "Running health check..."
+          curl -f http://${{ env.EC2_HOST }}:8001/health || exit 1
+          echo "Health check passed!"
