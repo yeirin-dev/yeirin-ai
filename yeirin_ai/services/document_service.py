@@ -262,7 +262,7 @@ async def process_assessment_summary(
 
     summary_result = None
     error_message = None
-    pdf_url = None  # S3에 업로드된 PDF URL
+    pdf_s3_key = None  # S3 객체 키 (presigned URL 생성에 사용)
 
     try:
         # 1. PDF 다운로드 (Playwright 사용하여 웹 페이지를 PDF로 변환)
@@ -290,15 +290,15 @@ async def process_assessment_summary(
         pdf_filename = f"KPRC_{safe_name}_{session_id[:8]}_{timestamp}.pdf"
 
         logger.info("[BACKGROUND] Step 1.5: S3 업로드 시작...")
-        pdf_url = await _upload_pdf_to_yeirin(
+        pdf_s3_key = await _upload_pdf_to_yeirin(
             pdf_bytes=pdf_bytes,
             filename=pdf_filename,
         )
 
-        if pdf_url:
+        if pdf_s3_key:
             logger.info(
                 "[BACKGROUND] Step 1.5 완료: S3 업로드 성공",
-                extra={"pdf_url": pdf_url},
+                extra={"pdf_s3_key": pdf_s3_key},
             )
         else:
             logger.warning(
@@ -365,7 +365,7 @@ async def process_assessment_summary(
             "recommendations": summary.recommendations,
             "confidence_score": summary.confidence_score,
             "generated_at": datetime.now(UTC).isoformat(),
-            "pdf_url": pdf_url,  # S3에 업로드된 PDF URL
+            "pdf_s3_key": pdf_s3_key,  # S3 객체 키 (presigned URL 생성에 사용)
         }
 
         # 요약 결과 상세 로깅
@@ -375,7 +375,7 @@ async def process_assessment_summary(
         print(f"[BACKGROUND] key_findings: {summary.key_findings}", flush=True)
         print(f"[BACKGROUND] recommendations: {summary.recommendations}", flush=True)
         print(f"[BACKGROUND] confidence_score: {summary.confidence_score}", flush=True)
-        print(f"[BACKGROUND] pdf_url: {pdf_url}", flush=True)
+        print(f"[BACKGROUND] pdf_s3_key: {pdf_s3_key}", flush=True)
 
         logger.info(
             "[BACKGROUND] Step 3 완료: 예이린 재해석 소견 생성 성공",
