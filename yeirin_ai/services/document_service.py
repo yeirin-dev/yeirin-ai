@@ -435,13 +435,15 @@ async def _upload_pdf_to_yeirin(
             response.raise_for_status()
 
             result = response.json()
-            pdf_url = result.get("url")
+            # S3 key를 사용 (presigned URL은 1시간 후 만료되므로 저장에 부적합)
+            # key는 영구적이며, 필요 시 presigned URL을 생성할 수 있음
+            pdf_key = result.get("key")
 
             logger.info(
                 "[PDF_UPLOAD] 업로드 성공",
-                extra={"pdf_url": pdf_url},
+                extra={"pdf_key": pdf_key},
             )
-            return pdf_url
+            return pdf_key
 
     except httpx.HTTPStatusError as e:
         logger.error(
