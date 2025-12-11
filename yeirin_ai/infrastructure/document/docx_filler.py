@@ -1,6 +1,6 @@
 """DOCX 템플릿 채우기.
 
-counsel_request_format.doc 템플릿을 상담의뢰지 데이터로 채웁니다.
+counsel_request_formatv2.docx 템플릿을 상담의뢰지 데이터로 채웁니다.
 """
 
 import io
@@ -9,14 +9,18 @@ from pathlib import Path
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml.ns import qn
 from docx.shared import Pt
 
 from yeirin_ai.domain.integrated_report.models import IntegratedReportRequest
 
 logger = logging.getLogger(__name__)
 
-# 템플릿 파일 경로
-TEMPLATE_PATH = Path(__file__).parent.parent.parent / "counsel_request_format.doc"
+# 나눔고딕 폰트 이름
+NANUM_GOTHIC_FONT = "나눔고딕"
+
+# 템플릿 파일 경로 (v2)
+TEMPLATE_PATH = Path(__file__).parent.parent.parent / "counsel_request_formatv2.docx"
 
 
 class DocxFillerError(Exception):
@@ -28,11 +32,19 @@ class DocxFillerError(Exception):
 class CounselRequestDocxFiller:
     """상담의뢰지 DOCX 템플릿 채우기.
 
-    counsel_request_format.doc 템플릿의 테이블 구조:
-    - 테이블 1: 기본 정보 (이름, 성별, 연령, 학년, 센터이용기준)
-    - 테이블 2: 정서심리 정보 (병력, 특이사항)
-    - 테이블 3: 의뢰 정보 (의뢰동기, 목표)
-    - 테이블 4: AI 종합소견
+    counsel_request_formatv2.docx 템플릿의 테이블 구조:
+    - 테이블 0: 표지 정보 (의뢰일자, 센터명, 담당자)
+    - 테이블 1: 섹션 헤더 "1 기본 정보"
+    - 테이블 2: 기본 정보 (이름, 성별, 연령, 학년)
+    - 테이블 3: 센터 이용 기준 (우선돌봄/일반/돌봄특례 + 상세 사유)
+    - 테이블 4: 섹션 헤더 "2 정서·심리 관련 정보"
+    - 테이블 5: 정서심리 정보 (병력, 특이사항)
+    - 테이블 6: 섹션 헤더 "3 의뢰동기 및 상담목표"
+    - 테이블 7: 의뢰 정보 (의뢰동기, 목표)
+    - 테이블 8: 섹션 헤더 "4 KPRC 검사결과"
+    - 테이블 9: AI 종합소견
+    - 테이블 10: 섹션 헤더 "5 보호자 동의 여부"
+    - 단락 18: 동의 체크박스
     """
 
     def __init__(self, template_path: Path | None = None) -> None:
@@ -61,22 +73,25 @@ class CounselRequestDocxFiller:
         try:
             doc = Document(str(self.template_path))
 
-            # 표지 정보 채우기 (단락에서)
-            self._fill_cover_info(doc, request)
+            # 테이블 0: 표지 정보 (의뢰일자, 센터명, 담당자)
+            self._fill_cover_table(doc.tables[0], request)
 
-            # 테이블 1: 기본 정보
-            self._fill_basic_info_table(doc.tables[0], request)
+            # 테이블 2: 기본 정보 (이름, 성별, 연령, 학년)
+            self._fill_basic_info_table(doc.tables[2], request)
 
-            # 테이블 2: 정서심리 정보
-            self._fill_psychological_info_table(doc.tables[1], request)
+            # 테이블 3: 센터 이용 기준 (체크박스)
+            self._fill_care_type_table(doc.tables[3], request)
 
-            # 테이블 3: 의뢰 정보
-            self._fill_motivation_table(doc.tables[2], request)
+            # 테이블 5: 정서심리 정보 (병력, 특이사항)
+            self._fill_psychological_info_table(doc.tables[5], request)
 
-            # 테이블 4: AI 종합소견
-            self._fill_ai_summary_table(doc.tables[3], request)
+            # 테이블 7: 의뢰 정보 (의뢰동기, 목표)
+            self._fill_motivation_table(doc.tables[7], request)
 
-            # 동의 체크박스 처리
+            # 테이블 9: AI 종합소견
+            self._fill_ai_summary_table(doc.tables[9], request)
+
+            # 동의 체크박스 처리 (단락에서)
             self._fill_consent(doc)
 
             # 바이트로 변환
@@ -101,28 +116,55 @@ class CounselRequestDocxFiller:
             )
             raise DocxFillerError(f"템플릿 채우기 실패: {e}") from e
 
-    def _fill_cover_info(self, doc: Document, request: IntegratedReportRequest) -> None:
-        """표지 정보를 채웁니다 (의뢰일자, 센터명, 담당자)."""
+    def _fill_cover_table(self, table, request: IntegratedReportRequest) -> None:
+        """테이블 0: 표지 정보를 채웁니다 (의뢰일자, 센터명, 담당자).
+
+        테이블 구조:
+        - Row 0: 의뢰일자 | 2025년 월 일
+        - Row 1: 센터명 | (빈칸)
+        - Row 2: 담당자 | (서명)
+        """
         cover = request.cover_info
         date_str = cover.requestDate.to_korean_string()
 
-        for para in doc.paragraphs:
-            text = para.text
+        # Row 0, Cell 1: 의뢰일자
+        if len(table.rows) > 0 and len(table.rows[0].cells) > 1:
+            self._set_cell_text_with_font(table.rows[0].cells[1], date_str, font_size=11)
 
-            # "의뢰일자: 2025년	월	일 센터명:" 패턴 처리
-            if "의뢰일자:" in text and "센터명:" in text:
-                # 전체 텍스트 재구성
-                new_text = f"의뢰일자: {date_str} 센터명: {cover.centerName}"
-                para.clear()
-                run = para.add_run(new_text)
-                run.font.size = Pt(11)
+        # Row 1, Cell 1: 센터명
+        if len(table.rows) > 1 and len(table.rows[1].cells) > 1:
+            self._set_cell_text_with_font(table.rows[1].cells[1], cover.centerName, font_size=11)
 
-            # "담당자:	(서명)" 패턴 처리
-            elif "담당자:" in text:
-                new_text = f"담당자: {cover.counselorName} (서명)"
-                para.clear()
-                run = para.add_run(new_text)
-                run.font.size = Pt(11)
+        # Row 2, Cell 1: 담당자
+        if len(table.rows) > 2 and len(table.rows[2].cells) > 1:
+            self._set_cell_text_with_font(
+                table.rows[2].cells[1], f"{cover.counselorName} (서명)", font_size=11
+            )
+
+    def _fill_basic_info_table(self, table, request: IntegratedReportRequest) -> None:
+        """테이블 2: 기본 정보를 채웁니다.
+
+        테이블 구조:
+        - Row 0: 이름 | (값) | 성별 | (값) | 연령 | (값)
+        - Row 1: 학년 | (값) | ... (merged cells)
+        """
+        child = request.basic_info.childInfo
+
+        # Row 0: 이름, 성별, 연령
+        row0 = table.rows[0]
+        if len(row0.cells) > 1:
+            self._set_cell_text_with_font(row0.cells[1], child.name, font_size=10)
+        if len(row0.cells) > 3:
+            self._set_cell_text_with_font(
+                row0.cells[3], self._gender_to_korean(child.gender), font_size=10
+            )
+        if len(row0.cells) > 5:
+            self._set_cell_text_with_font(row0.cells[5], str(child.age), font_size=10)
+
+        # Row 1: 학년
+        row1 = table.rows[1]
+        if len(row1.cells) > 1:
+            self._set_cell_text_with_font(row1.cells[1], child.grade, font_size=10)
 
     # 우선돌봄 세부 사유 → 한국어 텍스트 매핑
     PRIORITY_REASON_TEXT_MAP: dict[str, str] = {
@@ -133,64 +175,43 @@ class CounselRequestDocxFiller:
         "MULTICULTURAL": "다문화가족의 아동",
         "SINGLE_PARENT": "한부모가족의 아동",
         "GRANDPARENT": "조손가구의 아동",
-        "EDUCATION_SUPPORT": "초･중･고 교육비 지원 대상 아동",
+        "EDUCATION_SUPPORT": "초·중·고 교육비 지원 대상 아동",
         "MULTI_CHILD": "자녀가 2명 이상인 가구의 아동",
     }
 
-    def _fill_basic_info_table(
-        self, table, request: IntegratedReportRequest
-    ) -> None:
-        """테이블 1: 기본 정보를 채웁니다."""
-        child = request.basic_info.childInfo
+    def _fill_care_type_table(self, table, request: IntegratedReportRequest) -> None:
+        """테이블 3: 센터 이용 기준 체크박스를 처리합니다.
+
+        테이블 구조:
+        - Row 0: 센터이용기준 | □ 우선돌봄아동 | Cell[2]: 상세사유1 | Cell[3]: 상세사유2
+        - Row 1: 센터이용기준 | □ 일반 아동 | 설명 | 설명
+        - Row 2: 센터이용기준 | □ 돌봄특례아동 | 설명 | 설명
+        """
         care_type = request.basic_info.careType
         priority_reason = request.basic_info.priorityReason
 
-        # Row 0: 이름, 성별, 연령, 학년 값 채우기
-        # [0,1]: 이름값, [0,3]: 성별값, [0,5]: 연령값, [0,7]: 학년값
-        row = table.rows[0]
-
-        # 셀 인덱스 확인 후 값 설정
-        if len(row.cells) > 1:
-            row.cells[1].text = child.name
-        if len(row.cells) > 3:
-            row.cells[3].text = self._gender_to_korean(child.gender)
-        if len(row.cells) > 5:
-            row.cells[5].text = str(child.age)
-        if len(row.cells) > 7:
-            row.cells[7].text = child.grade
-
-        # 센터 이용 기준 체크박스 처리 (Row 1-3)
-        self._check_care_type(table, care_type, priority_reason)
-
-    def _check_care_type(
-        self, table, care_type: str, priority_reason: str | None
-    ) -> None:
-        """센터 이용 기준 체크박스를 처리합니다.
-
-        Args:
-            table: DOCX 테이블 객체
-            care_type: 센터 이용 기준 (PRIORITY/GENERAL/SPECIAL)
-            priority_reason: 우선돌봄 세부 사유 (careType이 PRIORITY일 때만 사용)
-        """
         # careType에 따라 해당 행의 체크박스를 체크
-        # PRIORITY -> Row 1, GENERAL -> Row 2, SPECIAL -> Row 3
-        row_index = {
-            "PRIORITY": 1,
-            "GENERAL": 2,
-            "SPECIAL": 3,
-        }.get(care_type, 1)
+        # PRIORITY -> Row 0, GENERAL -> Row 1, SPECIAL -> Row 2
+        row_index_map = {
+            "PRIORITY": 0,
+            "GENERAL": 1,
+            "SPECIAL": 2,
+        }
+        target_row_index = row_index_map.get(care_type, 0)
 
-        for i in range(1, 4):
+        for i in range(3):
+            if i >= len(table.rows):
+                continue
             row = table.rows[i]
-            cell = row.cells[1]
-            text = cell.text
-
-            if i == row_index:
-                # 체크 표시로 변경
-                cell.text = text.replace("□", "☑")
-            else:
-                # 빈 체크박스 유지
-                cell.text = text.replace("☑", "□")
+            if len(row.cells) > 1:
+                cell = row.cells[1]
+                text = cell.text
+                if i == target_row_index:
+                    # 체크 표시로 변경
+                    cell.text = text.replace("□", "☑")
+                else:
+                    # 빈 체크박스 유지
+                    cell.text = text.replace("☑", "□")
 
         # 우선돌봄 아동일 경우 상세 카테고리도 체크
         if care_type == "PRIORITY" and priority_reason:
@@ -199,12 +220,9 @@ class CounselRequestDocxFiller:
     def _check_priority_reason(self, table, priority_reason: str) -> None:
         """우선돌봄 세부 사유 체크박스를 처리합니다.
 
-        Row 1의 Cell 2~7에 상세 카테고리 체크 항목이 있습니다.
-        각 셀에서 해당하는 텍스트를 찾아 □를 ☑로 변경합니다.
-
-        Args:
-            table: DOCX 테이블 객체
-            priority_reason: 우선돌봄 세부 사유 enum 값
+        Row 0의 Cell 2, Cell 3에 상세 카테고리 체크 항목이 있습니다.
+        - Cell 2: 기초생활보장, 차상위계층, 의료급여, 장애가구
+        - Cell 3: 다문화가족, 한부모가족, 조손가구, 교육비지원, 자녀2명이상
         """
         target_text = self.PRIORITY_REASON_TEXT_MAP.get(priority_reason)
         if not target_text:
@@ -214,22 +232,21 @@ class CounselRequestDocxFiller:
             )
             return
 
-        # Row 1의 모든 셀을 순회하며 해당 텍스트 찾기
-        row = table.rows[1]
-        for cell in row.cells:
+        # Row 0의 Cell 2, Cell 3에서 해당 텍스트 찾기
+        row = table.rows[0]
+        for cell_idx in [2, 3]:
+            if cell_idx >= len(row.cells):
+                continue
+            cell = row.cells[cell_idx]
             cell_text = cell.text
-            # 해당 텍스트가 포함된 셀 찾기
+
             if target_text in cell_text:
                 # 해당 라인만 체크 표시
                 lines = cell_text.split("\n")
                 new_lines = []
                 for line in lines:
                     if target_text in line:
-                        # 체크박스가 없으면 앞에 추가
-                        if "□" not in line and "☑" not in line:
-                            new_lines.append(f"☑ {line}")
-                        else:
-                            new_lines.append(line.replace("□", "☑"))
+                        new_lines.append(line.replace("□", "☑"))
                     else:
                         new_lines.append(line)
                 cell.text = "\n".join(new_lines)
@@ -247,35 +264,58 @@ class CounselRequestDocxFiller:
     def _fill_psychological_info_table(
         self, table, request: IntegratedReportRequest
     ) -> None:
-        """테이블 2: 정서심리 정보를 채웁니다."""
+        """테이블 5: 정서심리 정보를 채웁니다.
+
+        테이블 구조:
+        - Row 0: 기존 아동 병력 | (값)
+        - Row 1: 병력 외 특이사항 | (값)
+        """
         psych = request.psychological_info
 
         # Row 0, Col 1: 기존 아동 병력
         if len(table.rows) > 0 and len(table.rows[0].cells) > 1:
-            table.rows[0].cells[1].text = psych.medicalHistory or "없음"
+            self._set_cell_text_with_font(
+                table.rows[0].cells[1], psych.medicalHistory or "없음", font_size=10
+            )
 
         # Row 1, Col 1: 병력 외 특이사항
         if len(table.rows) > 1 and len(table.rows[1].cells) > 1:
-            table.rows[1].cells[1].text = psych.specialNotes or "없음"
+            self._set_cell_text_with_font(
+                table.rows[1].cells[1], psych.specialNotes or "없음", font_size=10
+            )
 
     def _fill_motivation_table(
         self, table, request: IntegratedReportRequest
     ) -> None:
-        """테이블 3: 의뢰 정보를 채웁니다."""
+        """테이블 7: 의뢰 정보를 채웁니다.
+
+        테이블 구조:
+        - Row 0: 의뢰 동기 | (값)
+        - Row 1: 보호자 및 의뢰자의 목표 | (값)
+        """
         motivation = request.request_motivation
 
         # Row 0, Col 1: 의뢰 동기
         if len(table.rows) > 0 and len(table.rows[0].cells) > 1:
-            table.rows[0].cells[1].text = motivation.motivation
+            self._set_cell_text_with_font(
+                table.rows[0].cells[1], motivation.motivation, font_size=10
+            )
 
         # Row 1, Col 1: 보호자 및 의뢰자의 목표
         if len(table.rows) > 1 and len(table.rows[1].cells) > 1:
-            table.rows[1].cells[1].text = motivation.goals
+            self._set_cell_text_with_font(
+                table.rows[1].cells[1], motivation.goals, font_size=10
+            )
 
     def _fill_ai_summary_table(
         self, table, request: IntegratedReportRequest
     ) -> None:
-        """테이블 4: AI 종합소견을 채웁니다."""
+        """테이블 9: AI 종합소견을 채웁니다.
+
+        테이블 구조:
+        - Row 0: 예이린 AI 종합소견 (헤더)
+        - Row 1: (내용)
+        """
         kprc = request.kprc_summary
 
         # Row 1, Col 0: AI 종합소견 내용
@@ -307,20 +347,22 @@ class CounselRequestDocxFiller:
                 for rec in kprc.recommendations:
                     content_parts.append(f"• {rec}")
 
-            cell.text = "\n".join(content_parts)
+            # 나눔고딕 폰트로 셀 채우기
+            self._set_cell_text_with_font(cell, "\n".join(content_parts), font_size=10)
 
-            # 셀 스타일 설정
+            # 셀 스타일 설정 (정렬)
             for para in cell.paragraphs:
                 para.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                for run in para.runs:
-                    run.font.size = Pt(10)
 
     def _fill_consent(self, doc: Document) -> None:
-        """동의 체크박스를 처리합니다."""
+        """동의 체크박스를 처리합니다.
+
+        단락 18: □ 동의      □ 미동의
+        """
         for para in doc.paragraphs:
-            if "□ 동의" in para.text:
+            if "□ 동의" in para.text and "□ 미동의" in para.text:
                 # 동의에 체크
-                para.text = para.text.replace("□ 동의", "☑ 동의")
+                para.text = para.text.replace("□ 동의", "☑ 동의", 1)
                 break
 
     def _gender_to_korean(self, gender: str) -> str:
@@ -331,3 +373,27 @@ class CounselRequestDocxFiller:
             "M": "남",
             "F": "여",
         }.get(gender.upper(), gender)
+
+    def _set_cell_text_with_font(
+        self, cell, text: str, font_size: int = 10, bold: bool = False
+    ) -> None:
+        """셀에 텍스트를 설정하고 나눔고딕 폰트를 적용합니다."""
+        cell.text = ""
+        paragraph = cell.paragraphs[0] if cell.paragraphs else cell.add_paragraph()
+        paragraph.clear()
+        run = paragraph.add_run(text)
+        run.font.name = NANUM_GOTHIC_FONT
+        run._element.rPr.rFonts.set(qn("w:eastAsia"), NANUM_GOTHIC_FONT)
+        run.font.size = Pt(font_size)
+        run.font.bold = bold
+
+    def _set_paragraph_text_with_font(
+        self, paragraph, text: str, font_size: int = 10, bold: bool = False
+    ) -> None:
+        """단락에 텍스트를 설정하고 나눔고딕 폰트를 적용합니다."""
+        paragraph.clear()
+        run = paragraph.add_run(text)
+        run.font.name = NANUM_GOTHIC_FONT
+        run._element.rPr.rFonts.set(qn("w:eastAsia"), NANUM_GOTHIC_FONT)
+        run.font.size = Pt(font_size)
+        run.font.bold = bold

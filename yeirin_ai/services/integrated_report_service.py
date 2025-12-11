@@ -360,7 +360,7 @@ class IntegratedReportService:
             filename: 저장할 파일명
 
         Returns:
-            업로드된 PDF의 S3 키
+            업로드된 PDF의 S3 키 (integrated-reports/ 디렉터리)
 
         Raises:
             IntegratedReportServiceError: 업로드 실패 시
@@ -373,6 +373,7 @@ class IntegratedReportService:
                 "url": url,
                 "filename": filename,
                 "file_size": _format_bytes(len(pdf_bytes)),
+                "upload_folder": "integrated-reports",
             },
         )
 
@@ -384,6 +385,7 @@ class IntegratedReportService:
                 }
                 headers = {
                     "X-Internal-Api-Key": settings.internal_api_secret,
+                    "X-Upload-Folder": "integrated-reports",  # 통합 보고서 전용 디렉터리
                 }
 
                 response = await client.post(url, files=files, headers=headers)
