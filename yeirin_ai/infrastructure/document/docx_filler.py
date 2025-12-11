@@ -5,12 +5,11 @@ counsel_request_format.doc 템플릿을 상담의뢰지 데이터로 채웁니�
 
 import io
 import logging
-import re
 from pathlib import Path
 
 from docx import Document
-from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Pt
 
 from yeirin_ai.domain.integrated_report.models import IntegratedReportRequest
 
@@ -125,12 +124,26 @@ class CounselRequestDocxFiller:
                 run = para.add_run(new_text)
                 run.font.size = Pt(11)
 
+    # 우선돌봄 세부 사유 → 한국어 텍스트 매핑
+    PRIORITY_REASON_TEXT_MAP: dict[str, str] = {
+        "BASIC_LIVELIHOOD": "기초생활보장 수급권자",
+        "LOW_INCOME": "차상위계층 가구의 아동",
+        "MEDICAL_AID": "의료급여 수급권자",
+        "DISABILITY": "장애가구의 아동 또는 장애 아동",
+        "MULTICULTURAL": "다문화가족의 아동",
+        "SINGLE_PARENT": "한부모가족의 아동",
+        "GRANDPARENT": "조손가구의 아동",
+        "EDUCATION_SUPPORT": "초･중･고 교육비 지원 대상 아동",
+        "MULTI_CHILD": "자녀가 2명 이상인 가구의 아동",
+    }
+
     def _fill_basic_info_table(
         self, table, request: IntegratedReportRequest
     ) -> None:
         """테이블 1: 기본 정보를 채웁니다."""
         child = request.basic_info.childInfo
         care_type = request.basic_info.careType
+        priority_reason = request.basic_info.priorityReason
 
         # Row 0: 이름, 성별, 연령, 학년 값 채우기
         # [0,1]: 이름값, [0,3]: 성별값, [0,5]: 연령값, [0,7]: 학년값
@@ -147,10 +160,18 @@ class CounselRequestDocxFiller:
             row.cells[7].text = child.grade
 
         # 센터 이용 기준 체크박스 처리 (Row 1-3)
-        self._check_care_type(table, care_type)
+        self._check_care_type(table, care_type, priority_reason)
 
-    def _check_care_type(self, table, care_type: str) -> None:
-        """센터 이용 기준 체크박스를 처리합니다."""
+    def _check_care_type(
+        self, table, care_type: str, priority_reason: str | None
+    ) -> None:
+        """센터 이용 기준 체크박스를 처리합니다.
+
+        Args:
+            table: DOCX 테이블 객체
+            care_type: 센터 이용 기준 (PRIORITY/GENERAL/SPECIAL)
+            priority_reason: 우선돌봄 세부 사유 (careType이 PRIORITY일 때만 사용)
+        """
         # careType에 따라 해당 행의 체크박스를 체크
         # PRIORITY -> Row 1, GENERAL -> Row 2, SPECIAL -> Row 3
         row_index = {
@@ -170,6 +191,58 @@ class CounselRequestDocxFiller:
             else:
                 # 빈 체크박스 유지
                 cell.text = text.replace("☑", "□")
+
+        # 우선돌봄 아동일 경우 상세 카테고리도 체크
+        if care_type == "PRIORITY" and priority_reason:
+            self._check_priority_reason(table, priority_reason)
+
+    def _check_priority_reason(self, table, priority_reason: str) -> None:
+        """우선돌봄 세부 사유 체크박스를 처리합니다.
+
+        Row 1의 Cell 2~7에 상세 카테고리 체크 항목이 있습니다.
+        각 셀에서 해당하는 텍스트를 찾아 □를 ☑로 변경합니다.
+
+        Args:
+            table: DOCX 테이블 객체
+            priority_reason: 우선돌봄 세부 사유 enum 값
+        """
+        target_text = self.PRIORITY_REASON_TEXT_MAP.get(priority_reason)
+        if not target_text:
+            logger.warning(
+                "알 수 없는 priorityReason 값",
+                extra={"priority_reason": priority_reason},
+            )
+            return
+
+        # Row 1의 모든 셀을 순회하며 해당 텍스트 찾기
+        row = table.rows[1]
+        for cell in row.cells:
+            cell_text = cell.text
+            # 해당 텍스트가 포함된 셀 찾기
+            if target_text in cell_text:
+                # 해당 라인만 체크 표시
+                lines = cell_text.split("\n")
+                new_lines = []
+                for line in lines:
+                    if target_text in line:
+                        # 체크박스가 없으면 앞에 추가
+                        if "□" not in line and "☑" not in line:
+                            new_lines.append(f"☑ {line}")
+                        else:
+                            new_lines.append(line.replace("□", "☑"))
+                    else:
+                        new_lines.append(line)
+                cell.text = "\n".join(new_lines)
+                logger.debug(
+                    "우선돌봄 세부 사유 체크 완료",
+                    extra={"priority_reason": priority_reason, "target_text": target_text},
+                )
+                return
+
+        logger.warning(
+            "우선돌봄 세부 사유 텍스트를 찾을 수 없음",
+            extra={"priority_reason": priority_reason, "target_text": target_text},
+        )
 
     def _fill_psychological_info_table(
         self, table, request: IntegratedReportRequest
