@@ -479,3 +479,14 @@ class CounselRequestDocxFiller:
                                 if w_type == "dxa" and w_val:
                                     new_width = int(int(w_val) * scale_factor)
                                     tcW.set(qn("w:w"), str(new_width))
+
+                # 3. 테이블 가운데 정렬 추가
+                tblPr = tbl.tblPr
+                if tblPr is None:
+                    tblPr = OxmlElement("w:tblPr")
+                    tbl.insert(0, tblPr)
+                jc = tblPr.find(qn("w:jc"))
+                if jc is None:
+                    jc = OxmlElement("w:jc")
+                    tblPr.append(jc)
+                jc.set(qn("w:val"), "center")
