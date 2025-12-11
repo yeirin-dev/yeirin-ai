@@ -17,7 +17,7 @@ logging.basicConfig(
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from yeirin_ai.api.routes import documents, health, recommendations
+from yeirin_ai.api.routes import documents, health, integrated_reports, recommendations
 from yeirin_ai.core.config.settings import settings
 from yeirin_ai.infrastructure.database.connection import engine
 
@@ -66,6 +66,7 @@ app.add_middleware(
 app.include_router(health.router, prefix=settings.api_v1_prefix)
 app.include_router(recommendations.router, prefix=settings.api_v1_prefix)
 app.include_router(documents.router, prefix=settings.api_v1_prefix)
+app.include_router(integrated_reports.router, prefix=settings.api_v1_prefix)
 
 
 @app.get("/")
