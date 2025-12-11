@@ -69,11 +69,22 @@ class DocxToPdfConverter:
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 # multipart/form-data로 파일 전송
+                # Gotenberg LibreOffice 변환 옵션:
+                # - landscape: false (세로 방향)
+                # - nativePageRanges: 전체 페이지
+                # - PDF/A 포맷 사용하지 않음 (호환성)
                 files = {
                     "files": ("document.docx", docx_bytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
                 }
 
-                response = await client.post(url, files=files)
+                # Gotenberg LibreOffice 변환 시 페이지 설정 유지 옵션
+                # https://gotenberg.dev/docs/routes#convert-with-libreoffice
+                data = {
+                    "landscape": "false",
+                    "nativePdfFormat": "PDF/A-1a",  # PDF/A 호환 포맷
+                }
+
+                response = await client.post(url, files=files, data=data)
 
                 if response.status_code != 200:
                     error_detail = response.text[:500] if response.text else "No details"

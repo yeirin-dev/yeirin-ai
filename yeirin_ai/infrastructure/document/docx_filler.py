@@ -9,6 +9,7 @@ from pathlib import Path
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Pt
 
@@ -72,6 +73,9 @@ class CounselRequestDocxFiller:
         """
         try:
             doc = Document(str(self.template_path))
+
+            # 테이블 너비 자동 조정 (PDF 변환 시 여백 잘림 방지)
+            self._fix_table_widths(doc)
 
             # 테이블 0: 표지 정보 (의뢰일자, 센터명, 담당자)
             self._fill_cover_table(doc.tables[0], request)
@@ -397,3 +401,81 @@ class CounselRequestDocxFiller:
         run._element.rPr.rFonts.set(qn("w:eastAsia"), NANUM_GOTHIC_FONT)
         run.font.size = Pt(font_size)
         run.font.bold = bold
+
+    def _fix_table_widths(self, doc: Document) -> None:
+        """테이블 너비를 페이지 여백 내로 조정합니다.
+
+        LibreOffice PDF 변환 시 테이블 너비가 페이지를 초과하면
+        오른쪽 여백이 잘리는 문제가 발생합니다.
+        이 메서드는 tblGrid의 gridCol과 셀 너비를 비례 축소합니다.
+        """
+        # 페이지 사용 가능 너비 계산 (첫 번째 섹션 기준)
+        # DXA/Twips 단위 (1 inch = 1440 dxa/twips, 1 mm ≈ 56.7 dxa)
+        # Note: section.page_width는 Twips 객체, .twips로 접근
+        section = doc.sections[0]
+        page_width_dxa = section.page_width.twips
+        left_margin_dxa = section.left_margin.twips
+        right_margin_dxa = section.right_margin.twips
+        # 안전 마진 2mm (약 113 twips) 추가하여 여유 확보
+        safety_margin_dxa = 113
+        available_width_dxa = page_width_dxa - left_margin_dxa - right_margin_dxa - safety_margin_dxa
+
+        logger.debug(
+            "페이지 설정",
+            extra={
+                "page_width_mm": section.page_width.mm,
+                "available_width_mm": available_width_dxa / 56.7,
+            },
+        )
+
+        for table_idx, table in enumerate(doc.tables):
+            tbl = table._tbl
+
+            # tblGrid에서 그리드 컬럼 너비 확인
+            tblGrid = tbl.find(qn("w:tblGrid"))
+            if tblGrid is None:
+                continue
+
+            gridCols = tblGrid.findall(qn("w:gridCol"))
+            if not gridCols:
+                continue
+
+            # 그리드 컬럼 너비 합계 계산
+            total_grid_width = 0
+            grid_widths = []
+            for gc in gridCols:
+                w = gc.get(qn("w:w"))
+                width = int(w) if w else 0
+                grid_widths.append(width)
+                total_grid_width += width
+
+            # 너비가 페이지를 초과하면 비례 축소
+            if total_grid_width > available_width_dxa:
+                scale_factor = available_width_dxa / total_grid_width
+                logger.debug(
+                    f"테이블 {table_idx} 너비 조정",
+                    extra={
+                        "original_width_mm": total_grid_width / 56.7,
+                        "available_width_mm": available_width_dxa / 56.7,
+                        "scale_factor": f"{scale_factor:.2f}",
+                    },
+                )
+
+                # 1. gridCol 너비 축소
+                for i, gc in enumerate(gridCols):
+                    new_width = int(grid_widths[i] * scale_factor)
+                    gc.set(qn("w:w"), str(new_width))
+
+                # 2. 모든 행의 셀 너비 축소
+                for row in table.rows:
+                    for cell in row.cells:
+                        tc = cell._tc
+                        tcPr = tc.tcPr
+                        if tcPr is not None:
+                            tcW = tcPr.find(qn("w:tcW"))
+                            if tcW is not None:
+                                w_type = tcW.get(qn("w:type"))
+                                w_val = tcW.get(qn("w:w"))
+                                if w_type == "dxa" and w_val:
+                                    new_width = int(int(w_val) * scale_factor)
+                                    tcW.set(qn("w:w"), str(new_width))
