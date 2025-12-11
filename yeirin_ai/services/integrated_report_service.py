@@ -155,18 +155,18 @@ class IntegratedReportService:
             step5_start = time.time()
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             safe_name = "".join(c for c in request.child_name if c.isalnum() or c in "가-힣")
-            filename = f"IR_{safe_name}_{request.counsel_request_id[:8]}_{timestamp}.pdf"
+            output_filename = f"IR_{safe_name}_{request.counsel_request_id[:8]}_{timestamp}.pdf"
             logger.info(
                 "[INTEGRATED_REPORT] Step 5: S3 업로드 시작...",
                 extra={
-                    "filename": filename,
+                    "output_file": output_filename,
                     "file_size": _format_bytes(len(merged_pdf_bytes)),
                 },
             )
 
             s3_key = await self._upload_to_yeirin(
                 pdf_bytes=merged_pdf_bytes,
-                filename=filename,
+                filename=output_filename,
             )
             step5_duration = time.time() - step5_start
             logger.info(
