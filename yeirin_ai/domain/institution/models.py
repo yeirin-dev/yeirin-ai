@@ -1,4 +1,7 @@
-"""Institution domain models."""
+"""기관 도메인 모델.
+
+바우처 상담 기관과 관련된 핵심 도메인 모델 및 열거형을 정의합니다.
+"""
 
 from datetime import date
 from enum import Enum
@@ -6,38 +9,51 @@ from typing import Any
 
 
 class VoucherType(str, Enum):
-    """바우처 유형."""
+    """바우처 유형.
 
-    DEVELOPMENTAL_REHABILITATION = "DEVELOPMENTAL_REHABILITATION"
-    LANGUAGE_DEVELOPMENT = "LANGUAGE_DEVELOPMENT"
-    CHILD_PSYCHOLOGY = "CHILD_PSYCHOLOGY"
-    PARENT_COUNSELING = "PARENT_COUNSELING"
-    OTHER = "OTHER"
+    정부 지원 바우처 프로그램 종류를 정의합니다.
+    """
+
+    DEVELOPMENTAL_REHABILITATION = "DEVELOPMENTAL_REHABILITATION"  # 발달재활
+    LANGUAGE_DEVELOPMENT = "LANGUAGE_DEVELOPMENT"  # 언어발달
+    CHILD_PSYCHOLOGY = "CHILD_PSYCHOLOGY"  # 아동심리
+    PARENT_COUNSELING = "PARENT_COUNSELING"  # 부모상담
+    OTHER = "OTHER"  # 기타
 
 
 class ServiceType(str, Enum):
-    """서비스 유형."""
+    """서비스 유형.
 
-    COUNSELING = "COUNSELING"
-    ART_THERAPY = "ART_THERAPY"
-    MUSIC_THERAPY = "MUSIC_THERAPY"
-    PLAY_THERAPY = "PLAY_THERAPY"
-    SENSORY_INTEGRATION = "SENSORY_INTEGRATION"
-    COGNITIVE_THERAPY = "COGNITIVE_THERAPY"
-    OTHER = "OTHER"
+    상담 기관에서 제공하는 서비스 종류를 정의합니다.
+    """
+
+    COUNSELING = "COUNSELING"  # 일반 상담
+    ART_THERAPY = "ART_THERAPY"  # 미술치료
+    MUSIC_THERAPY = "MUSIC_THERAPY"  # 음악치료
+    PLAY_THERAPY = "PLAY_THERAPY"  # 놀이치료
+    SENSORY_INTEGRATION = "SENSORY_INTEGRATION"  # 감각통합
+    COGNITIVE_THERAPY = "COGNITIVE_THERAPY"  # 인지치료
+    OTHER = "OTHER"  # 기타
 
 
 class SpecialTreatment(str, Enum):
-    """특수 치료."""
+    """특수 치료 유형.
 
-    LANGUAGE = "LANGUAGE"
-    DEVELOPMENTAL_REHABILITATION = "DEVELOPMENTAL_REHABILITATION"
-    OTHER = "OTHER"
-    NONE = "NONE"
+    전문 특수 치료 종류를 정의합니다.
+    """
+
+    LANGUAGE = "LANGUAGE"  # 언어치료
+    DEVELOPMENTAL_REHABILITATION = "DEVELOPMENTAL_REHABILITATION"  # 발달재활치료
+    OTHER = "OTHER"  # 기타
+    NONE = "NONE"  # 없음
 
 
 class Institution:
-    """바우처 상담 기관 도메인 모델."""
+    """바우처 상담 기관 도메인 모델.
+
+    상담 기관의 모든 정보를 캡슐화합니다.
+    AI 추천 시스템에서 기관 특성을 분석하는 데 사용됩니다.
+    """
 
     def __init__(
         self,
@@ -61,14 +77,13 @@ class Institution:
         average_rating: float,
         review_count: int,
     ) -> None:
-        """
-        Initialize institution.
+        """기관을 초기화합니다.
 
         Args:
-            id: 기관 ID (UUID)
+            id: 기관 UUID
             center_name: 센터명
             representative_name: 대표자명
-            address: 주소
+            address: 기관 주소
             established_date: 설립일
             operating_vouchers: 운영 중인 바우처 목록
             is_quality_certified: 품질 인증 여부
@@ -82,7 +97,7 @@ class Institution:
             provided_services: 제공 서비스 목록
             special_treatments: 특수 치료 목록
             can_provide_parent_counseling: 부모 상담 제공 가능 여부
-            average_rating: 평균 별점
+            average_rating: 평균 별점 (5점 만점)
             review_count: 리뷰 수
         """
         self.id = id
@@ -106,7 +121,11 @@ class Institution:
         self.review_count = review_count
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for LLM context."""
+        """LLM 컨텍스트용 딕셔너리로 변환합니다.
+
+        Returns:
+            기관 정보 딕셔너리
+        """
         return {
             "id": self.id,
             "center_name": self.center_name,
@@ -127,5 +146,5 @@ class Institution:
         }
 
     def __repr__(self) -> str:
-        """String representation."""
+        """문자열 표현을 반환합니다."""
         return f"<Institution id={self.id} name={self.center_name}>"

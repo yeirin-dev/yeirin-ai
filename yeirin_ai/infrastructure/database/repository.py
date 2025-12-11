@@ -1,4 +1,4 @@
-"""Institution repository for database access."""
+"""기관 레포지토리 - 데이터베이스 접근 계층."""
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,23 +8,25 @@ from yeirin_ai.infrastructure.database.models import VoucherInstitutionORM
 
 
 class InstitutionRepository:
-    """바우처 기관 레포지토리 (읽기 전용)."""
+    """바우처 기관 레포지토리 (읽기 전용).
+
+    yeirin 메인 백엔드의 voucher_institutions 테이블에서
+    기관 정보를 조회합니다.
+    """
 
     def __init__(self, session: AsyncSession) -> None:
-        """
-        Initialize repository.
+        """레포지토리를 초기화합니다.
 
         Args:
-            session: Database session
+            session: 비동기 데이터베이스 세션
         """
         self.session = session
 
     async def get_all(self) -> list[Institution]:
-        """
-        Get all institutions.
+        """모든 기관을 조회합니다.
 
         Returns:
-            List of all institutions
+            전체 기관 도메인 모델 목록
         """
         result = await self.session.execute(select(VoucherInstitutionORM))
         orm_institutions = result.scalars().all()
@@ -32,14 +34,13 @@ class InstitutionRepository:
         return [self._to_domain(orm_inst) for orm_inst in orm_institutions]
 
     async def get_by_id(self, institution_id: str) -> Institution | None:
-        """
-        Get institution by ID.
+        """ID로 기관을 조회합니다.
 
         Args:
-            institution_id: Institution UUID
+            institution_id: 기관 UUID
 
         Returns:
-            Institution if found, None otherwise
+            기관이 존재하면 도메인 모델, 없으면 None
         """
         result = await self.session.execute(
             select(VoucherInstitutionORM).where(VoucherInstitutionORM.id == institution_id)
@@ -49,14 +50,13 @@ class InstitutionRepository:
         return self._to_domain(orm_institution) if orm_institution else None
 
     def _to_domain(self, orm_inst: VoucherInstitutionORM) -> Institution:
-        """
-        Convert ORM model to domain model.
+        """ORM 모델을 도메인 모델로 변환합니다.
 
         Args:
-            orm_inst: ORM institution
+            orm_inst: ORM 기관 엔티티
 
         Returns:
-            Domain institution
+            기관 도메인 모델
         """
         return Institution(
             id=str(orm_inst.id),

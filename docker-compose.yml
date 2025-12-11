@@ -1,0 +1,51 @@
+# yeirin-ai Local Development
+# LibreOffice headless 포함 환경
+
+services:
+  yeirin-ai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: yeirin-ai
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql://yeirin:yeirin123@host.docker.internal:5433/yeirin_dev
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=gpt-4o-mini
+      - DEBUG=true
+      - LOG_LEVEL=INFO
+      - YEIRIN_BACKEND_URL=http://host.docker.internal:3000
+      - INTERNAL_API_SECRET=yeirin-internal-secret
+    volumes:
+      # 소스 코드 마운트 (개발 시 코드 변경 반영)
+      - ./yeirin_ai:/app/yeirin_ai:ro
+      # 템플릿 파일
+      - ./yeirin_ai/counsel_request_format.doc:/app/yeirin_ai/counsel_request_format.doc:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # 개발용 핫 리로드 (선택)
+  yeirin-ai-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: yeirin-ai-dev
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql://yeirin:yeirin123@host.docker.internal:5433/yeirin_dev
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=gpt-4o-mini
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+      - YEIRIN_BACKEND_URL=http://host.docker.internal:3000
+      - INTERNAL_API_SECRET=yeirin-internal-secret
+    volumes:
+      - ./yeirin_ai:/app/yeirin_ai
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: uv run uvicorn yeirin_ai.main:app --host 0.0.0.0 --port 8001 --reload
+    profiles:
+      - dev

@@ -1,17 +1,25 @@
-"""Recommendation domain models."""
+"""추천 도메인 모델.
+
+상담 기관 추천과 관련된 핵심 도메인 모델을 정의합니다.
+"""
 
 from pydantic import BaseModel, Field
 
 
 class RecommendationRequest:
-    """상담 센터 추천 요청 도메인 모델."""
+    """상담 기관 추천 요청 도메인 모델.
+
+    상담 의뢰지 텍스트를 캡슐화하고 유효성 검증을 수행합니다.
+    """
 
     def __init__(self, counsel_request_text: str) -> None:
-        """
-        Initialize recommendation request.
+        """추천 요청을 초기화합니다.
 
         Args:
             counsel_request_text: 상담 의뢰지 텍스트 (10-5000자)
+
+        Raises:
+            ValueError: 텍스트 길이가 유효하지 않은 경우
         """
         if not counsel_request_text or len(counsel_request_text.strip()) < 10:
             raise ValueError("상담 의뢰지 텍스트는 최소 10자 이상이어야 합니다")
@@ -21,7 +29,7 @@ class RecommendationRequest:
         self.counsel_request_text = counsel_request_text.strip()
 
     def __repr__(self) -> str:
-        """String representation."""
+        """문자열 표현을 반환합니다."""
         preview = (
             self.counsel_request_text[:50] + "..."
             if len(self.counsel_request_text) > 50
@@ -31,17 +39,20 @@ class RecommendationRequest:
 
 
 class InstitutionRecommendation(BaseModel):
-    """개별 기관 추천 결과."""
+    """개별 기관 추천 결과.
 
-    institution_id: str = Field(description="기관 ID")
+    AI가 분석한 개별 기관의 추천 점수와 이유를 담습니다.
+    """
+
+    institution_id: str = Field(description="기관 UUID")
     center_name: str = Field(description="센터명")
     score: float = Field(ge=0.0, le=1.0, description="추천 점수 (0.0-1.0)")
-    reasoning: str = Field(description="추천 이유")
-    address: str = Field(description="주소")
-    average_rating: float = Field(description="평균 별점")
+    reasoning: str = Field(description="추천 이유 (AI 분석 결과)")
+    address: str = Field(description="기관 주소")
+    average_rating: float = Field(description="평균 별점 (5점 만점)")
 
     class Config:
-        """Pydantic configuration."""
+        """Pydantic 설정."""
 
         json_schema_extra = {
             "example": {
@@ -56,7 +67,10 @@ class InstitutionRecommendation(BaseModel):
 
 
 class RecommendationResult:
-    """추천 결과 도메인 모델."""
+    """추천 결과 도메인 모델.
+
+    전체 추천 결과를 캡슐화합니다.
+    """
 
     def __init__(
         self,
@@ -64,8 +78,7 @@ class RecommendationResult:
         recommendations: list[InstitutionRecommendation],
         total_count: int,
     ) -> None:
-        """
-        Initialize recommendation result.
+        """추천 결과를 초기화합니다.
 
         Args:
             request_text: 원본 요청 텍스트
@@ -77,11 +90,15 @@ class RecommendationResult:
         self.total_count = total_count
 
     def get_top_recommendation(self) -> InstitutionRecommendation | None:
-        """Get the top recommendation."""
+        """최상위 추천 기관을 반환합니다.
+
+        Returns:
+            가장 높은 점수의 추천 기관, 없으면 None
+        """
         return self.recommendations[0] if self.recommendations else None
 
     def __repr__(self) -> str:
-        """String representation."""
+        """문자열 표현을 반환합니다."""
         return (
             f"<RecommendationResult "
             f"count={len(self.recommendations)} "
