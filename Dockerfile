@@ -1,21 +1,12 @@
-# yeirin-ai Dockerfile (Local Development)
-# LibreOffice headless 포함 - DOCX → PDF 변환용
+# yeirin-ai Dockerfile
+# Gotenberg API 사용 - LibreOffice 불필요
 
 FROM python:3.12-slim
 
-# 시스템 패키지 설치
+# 시스템 패키지 설치 (최소)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # LibreOffice (DOCX → PDF 변환)
-    libreoffice-writer \
-    libreoffice-common \
-    # 한글 폰트
-    fonts-nanum \
-    fonts-nanum-coding \
-    fonts-nanum-extra \
-    # 기타 의존성
     curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && fc-cache -fv
+    && rm -rf /var/lib/apt/lists/*
 
 # uv 설치
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
@@ -37,6 +28,10 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 # 포트 노출
 EXPOSE 8001
+
+# 헬스 체크
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8001/api/v1/health || exit 1
 
 # 실행
 CMD ["uv", "run", "uvicorn", "yeirin_ai.main:app", "--host", "0.0.0.0", "--port", "8001"]

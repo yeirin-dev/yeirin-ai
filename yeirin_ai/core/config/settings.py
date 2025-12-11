@@ -69,6 +69,11 @@ class Settings(BaseSettings):
         default="yeirin-internal-secret", description="내부 서비스 간 통신용 API 키"
     )
 
+    # Gotenberg (DOCX → PDF 변환) 설정
+    gotenberg_url: str = Field(
+        default="http://localhost:3001", description="Gotenberg 서버 URL"
+    )
+
 
 # 전역 설정 인스턴스
 settings = Settings()

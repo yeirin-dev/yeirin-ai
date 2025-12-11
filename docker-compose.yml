@@ -1,7 +1,26 @@
 # yeirin-ai Local Development
-# LibreOffice headless 포함 환경
+# Gotenberg 기반 DOCX → PDF 변환
 
 services:
+  # ===========================================
+  # Gotenberg - 문서 변환 서비스
+  # ===========================================
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    container_name: gotenberg
+    ports:
+      - "3001:3000"
+    environment:
+      - GOTENBERG_API_TIMEOUT=60s
+      - GOTENBERG_LIBREOFFICE_DISABLE_ROUTES=false
+    restart: unless-stopped
+    # 한글 폰트 설치 (선택사항 - 커스텀 이미지 필요시)
+    # volumes:
+    #   - ./fonts:/usr/share/fonts/custom:ro
+
+  # ===========================================
+  # yeirin-ai - AI 추천 서비스
+  # ===========================================
   yeirin-ai:
     build:
       context: .
@@ -17,16 +36,18 @@ services:
       - LOG_LEVEL=INFO
       - YEIRIN_BACKEND_URL=http://host.docker.internal:3000
       - INTERNAL_API_SECRET=yeirin-internal-secret
+      - GOTENBERG_URL=http://gotenberg:3000
     volumes:
-      # 소스 코드 마운트 (개발 시 코드 변경 반영)
       - ./yeirin_ai:/app/yeirin_ai:ro
-      # 템플릿 파일
-      - ./yeirin_ai/counsel_request_format.doc:/app/yeirin_ai/counsel_request_format.doc:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      - gotenberg
     restart: unless-stopped
 
-  # 개발용 핫 리로드 (선택)
+  # ===========================================
+  # 개발용 (핫 리로드)
+  # ===========================================
   yeirin-ai-dev:
     build:
       context: .
@@ -42,10 +63,13 @@ services:
       - LOG_LEVEL=DEBUG
       - YEIRIN_BACKEND_URL=http://host.docker.internal:3000
       - INTERNAL_API_SECRET=yeirin-internal-secret
+      - GOTENBERG_URL=http://gotenberg:3000
     volumes:
       - ./yeirin_ai:/app/yeirin_ai
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command: uv run uvicorn yeirin_ai.main:app --host 0.0.0.0 --port 8001 --reload
+    depends_on:
+      - gotenberg
     profiles:
       - dev
