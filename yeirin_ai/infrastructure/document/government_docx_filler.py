@@ -373,6 +373,12 @@ class GovernmentDocxFiller:
         cell.text = ""
         paragraph = cell.paragraphs[0] if cell.paragraphs else cell.add_paragraph()
         paragraph.clear()
+
+        # 단락 왼쪽 들여쓰기 제거 (② 판단계기 왼쪽 쏠림 문제 해결)
+        paragraph_format = paragraph.paragraph_format
+        paragraph_format.left_indent = Pt(0)
+        paragraph_format.first_line_indent = Pt(0)
+
         run = paragraph.add_run(text)
         run.font.name = NANUM_GOTHIC_FONT
         run._element.rPr.rFonts.set(qn("w:eastAsia"), NANUM_GOTHIC_FONT)
