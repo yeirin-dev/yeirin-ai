@@ -184,7 +184,8 @@ class GovernmentDocxFiller:
         테이블 구조:
         - Row 0: ① 추천사유 | (내용)
         - Row 1: ② 판단계기 | (내용)
-        - Row 2-3: ③ 추천자 의견 | (내용)
+        - Row 2: ③ 추천자 의견 | (안내문구 - 서비스 지원이 필요한 분야 등)
+        - Row 3: ③ 추천자 의견 | (실제 내용)
 
         Args:
             table: DOCX 테이블 객체
@@ -222,8 +223,8 @@ class GovernmentDocxFiller:
                 table.rows[1].cells[1], judgment_basis, font_size=10
             )
 
-        # Row 2-3: ③ 추천자 의견 (서비스 지원이 필요한 분야 등)
-        if len(table.rows) > 2 and len(table.rows[2].cells) > 1:
+        # Row 3: ③ 추천자 의견 (Row 2는 안내문구, Row 3에 실제 내용 작성)
+        if len(table.rows) > 3 and len(table.rows[3].cells) > 1:
             # AI 생성 추천자 의견이 있으면 사용, 없으면 기존 로직 (fallback)
             if recommender_opinion and recommender_opinion.opinion_text:
                 # AI 생성 추천자 의견 사용
@@ -267,7 +268,7 @@ class GovernmentDocxFiller:
                     extra={"opinion_length": len(opinion)},
                 )
 
-            self._set_cell_text_with_font(table.rows[2].cells[1], opinion, font_size=10)
+            self._set_cell_text_with_font(table.rows[3].cells[1], opinion, font_size=10)
 
     def _fill_writer_table(self, table, request: IntegratedReportRequest) -> None:
         """테이블 2: 작성자 정보를 채웁니다.
