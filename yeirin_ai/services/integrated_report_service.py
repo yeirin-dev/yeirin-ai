@@ -17,6 +17,11 @@ from yeirin_ai.domain.integrated_report.models import (
 )
 from yeirin_ai.infrastructure.document import CounselRequestDocxFiller, DocxToPdfConverter
 from yeirin_ai.infrastructure.document.government_docx_filler import GovernmentDocxFiller
+from yeirin_ai.infrastructure.llm.recommender_opinion_generator import (
+    ChildContext,
+    RecommenderOpinion,
+    RecommenderOpinionGenerator,
+)
 from yeirin_ai.infrastructure.pdf import PDFMerger
 
 logger = logging.getLogger(__name__)
@@ -62,6 +67,7 @@ class IntegratedReportService:
         self.government_docx_filler = GovernmentDocxFiller()
         self.pdf_converter = DocxToPdfConverter()
         self.pdf_merger = PDFMerger()
+        self.recommender_opinion_generator = RecommenderOpinionGenerator()
 
     async def process(self, request: IntegratedReportRequest) -> IntegratedReportResult:
         """통합 보고서를 생성합니다.
@@ -93,8 +99,52 @@ class IntegratedReportService:
                 step1_start = time.time()
                 logger.info("[INTEGRATED_REPORT] Step 1: 사회서비스 이용 추천서 생성 시작...")
 
+                # 1-0. Soul-E 대화내역 기반 추천자 의견 생성
+                recommender_opinion: RecommenderOpinion | None = None
+                if request.child_id:
+                    try:
+                        logger.info(
+                            "[INTEGRATED_REPORT] Step 1-0: 추천자 의견 AI 생성 시작...",
+                            extra={"child_id": request.child_id},
+                        )
+                        opinion_start = time.time()
+
+                        # 아동 컨텍스트 구성
+                        child_context = ChildContext(
+                            name=request.child_name,
+                            age=request.basic_info.childInfo.age if request.basic_info else None,
+                            gender=request.basic_info.childInfo.gender if request.basic_info else None,
+                            goals=request.request_motivation.goals if request.request_motivation else None,
+                        )
+
+                        # Soul-E 대화내역 기반 추천자 의견 생성
+                        recommender_opinion = await self.recommender_opinion_generator.generate_from_child_id(
+                            child_id=request.child_id,
+                            child_context=child_context,
+                        )
+
+                        opinion_duration = time.time() - opinion_start
+                        logger.info(
+                            "[INTEGRATED_REPORT] Step 1-0 완료: 추천자 의견 AI 생성",
+                            extra={
+                                "child_id": request.child_id,
+                                "opinion_length": len(recommender_opinion.opinion_text),
+                                "confidence": recommender_opinion.confidence_score,
+                                "duration": _format_duration(opinion_duration),
+                            },
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "[INTEGRATED_REPORT] 추천자 의견 생성 실패, 기본 로직 사용",
+                            extra={"child_id": request.child_id, "error": str(e)},
+                        )
+                        # 실패해도 계속 진행 (기존 KPRC 기반 로직 사용)
+                        recommender_opinion = None
+
                 # 1-1. Government DOCX 템플릿 채우기
-                government_docx_bytes = self.government_docx_filler.fill_template(request)
+                government_docx_bytes = self.government_docx_filler.fill_template(
+                    request, recommender_opinion=recommender_opinion
+                )
                 logger.debug(
                     "[INTEGRATED_REPORT] 사회서비스 추천서 DOCX 생성 완료",
                     extra={"docx_size": _format_bytes(len(government_docx_bytes))},

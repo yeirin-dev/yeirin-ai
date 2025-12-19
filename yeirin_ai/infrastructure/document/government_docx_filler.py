@@ -12,6 +12,7 @@ from docx.oxml.ns import qn
 from docx.shared import Pt
 
 from yeirin_ai.domain.integrated_report.models import IntegratedReportRequest
+from yeirin_ai.infrastructure.llm.recommender_opinion_generator import RecommenderOpinion
 
 logger = logging.getLogger(__name__)
 
@@ -61,11 +62,16 @@ class GovernmentDocxFiller:
                 f"템플릿 파일을 찾을 수 없습니다: {self.template_path}"
             )
 
-    def fill_template(self, request: IntegratedReportRequest) -> bytes:
+    def fill_template(
+        self,
+        request: IntegratedReportRequest,
+        recommender_opinion: RecommenderOpinion | None = None,
+    ) -> bytes:
         """템플릿을 데이터로 채웁니다.
 
         Args:
             request: 통합 보고서 생성 요청 데이터
+            recommender_opinion: AI 생성 추천자 의견 (선택). 제공되면 ③ 추천자 의견에 사용.
 
         Returns:
             채워진 DOCX 파일의 바이트 데이터
@@ -82,7 +88,9 @@ class GovernmentDocxFiller:
 
             # 테이블 1: 추천사유 및 판단근거
             if len(doc.tables) > 1:
-                self._fill_recommendation_reason_table(doc.tables[1], request)
+                self._fill_recommendation_reason_table(
+                    doc.tables[1], request, recommender_opinion
+                )
 
             # 테이블 2: 작성자
             if len(doc.tables) > 2:
@@ -166,7 +174,10 @@ class GovernmentDocxFiller:
                 self._set_cell_text_with_font(row3.cells[2], phone_str, font_size=10)
 
     def _fill_recommendation_reason_table(
-        self, table, request: IntegratedReportRequest
+        self,
+        table,
+        request: IntegratedReportRequest,
+        recommender_opinion: RecommenderOpinion | None = None,
     ) -> None:
         """테이블 1: 추천사유 및 판단근거를 채웁니다.
 
@@ -174,6 +185,11 @@ class GovernmentDocxFiller:
         - Row 0: ① 추천사유 | (내용)
         - Row 1: ② 판단계기 | (내용)
         - Row 2-3: ③ 추천자 의견 | (내용)
+
+        Args:
+            table: DOCX 테이블 객체
+            request: 통합 보고서 요청 데이터
+            recommender_opinion: AI 생성 추천자 의견 (선택)
         """
         motivation = request.request_motivation
         psych = request.psychological_info
@@ -208,23 +224,49 @@ class GovernmentDocxFiller:
 
         # Row 2-3: ③ 추천자 의견 (서비스 지원이 필요한 분야 등)
         if len(table.rows) > 2 and len(table.rows[2].cells) > 1:
-            opinion_parts = []
+            # AI 생성 추천자 의견이 있으면 사용, 없으면 기존 로직 (fallback)
+            if recommender_opinion and recommender_opinion.opinion_text:
+                # AI 생성 추천자 의견 사용
+                opinion = recommender_opinion.opinion_text
 
-            # 목표
-            if motivation.goals:
-                opinion_parts.append(f"[상담 목표]\n{motivation.goals}")
+                # 필요 서비스 분야가 있으면 추가
+                if recommender_opinion.service_needs:
+                    needs_text = "\n".join(
+                        f"• {need}" for need in recommender_opinion.service_needs
+                    )
+                    opinion += f"\n\n[서비스 지원이 필요한 분야]\n{needs_text}"
 
-            # 권장사항
-            if kprc.recommendations:
-                recommendations_text = "\n".join(f"• {rec}" for rec in kprc.recommendations)
-                opinion_parts.append(f"\n\n[권장사항]\n{recommendations_text}")
+                logger.info(
+                    "AI 생성 추천자 의견 사용",
+                    extra={"opinion_length": len(opinion)},
+                )
+            else:
+                # Fallback: 기존 로직 사용
+                opinion_parts = []
 
-            # 핵심 발견사항
-            if kprc.keyFindings:
-                findings_text = "\n".join(f"• {f}" for f in kprc.keyFindings)
-                opinion_parts.append(f"\n\n[핵심 발견사항]\n{findings_text}")
+                # 목표
+                if motivation.goals:
+                    opinion_parts.append(f"[상담 목표]\n{motivation.goals}")
 
-            opinion = "".join(opinion_parts) if opinion_parts else ""
+                # 권장사항
+                if kprc.recommendations:
+                    recommendations_text = "\n".join(
+                        f"• {rec}" for rec in kprc.recommendations
+                    )
+                    opinion_parts.append(f"\n\n[권장사항]\n{recommendations_text}")
+
+                # 핵심 발견사항
+                if kprc.keyFindings:
+                    findings_text = "\n".join(f"• {f}" for f in kprc.keyFindings)
+                    opinion_parts.append(f"\n\n[핵심 발견사항]\n{findings_text}")
+
+                opinion = "".join(opinion_parts) if opinion_parts else ""
+
+                logger.info(
+                    "기존 KPRC 기반 추천자 의견 사용 (fallback)",
+                    extra={"opinion_length": len(opinion)},
+                )
+
             self._set_cell_text_with_font(table.rows[2].cells[1], opinion, font_size=10)
 
     def _fill_writer_table(self, table, request: IntegratedReportRequest) -> None:
