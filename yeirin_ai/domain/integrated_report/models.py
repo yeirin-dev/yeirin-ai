@@ -26,6 +26,18 @@ class RequestDate(BaseModel):
         return f"{self.year}년 {self.month}월 {self.day}일"
 
 
+class BirthDate(BaseModel):
+    """생년월일."""
+
+    year: int = Field(..., description="년도")
+    month: int = Field(..., ge=1, le=12, description="월")
+    day: int = Field(..., ge=1, le=31, description="일")
+
+    def to_korean_string(self) -> str:
+        """한국어 날짜 문자열로 변환 (YYYY년 MM월 DD일)."""
+        return f"{self.year}년 {self.month}월 {self.day}일"
+
+
 class CoverInfo(BaseModel):
     """표지 정보."""
 
@@ -41,6 +53,7 @@ class ChildInfo(BaseModel):
     gender: str = Field(..., description="성별 (MALE/FEMALE)")
     age: int = Field(..., ge=0, description="연령")
     grade: str = Field(..., description="학년")
+    birthDate: BirthDate | None = Field(None, description="생년월일 (government doc용)")
 
 
 class BasicInfo(BaseModel):
@@ -75,6 +88,40 @@ class KprcSummary(BaseModel):
     confidenceScore: float | None = Field(None, ge=0.0, le=1.0, description="신뢰도 점수")
 
 
+# =============================================================================
+# 사회서비스 이용 추천서 (Government Doc) 전용 모델
+# =============================================================================
+
+
+class GuardianInfo(BaseModel):
+    """보호자 정보 (사회서비스 이용 추천서용).
+
+    테이블 1: 대상자 인적사항의 보호자 관련 정보
+    """
+
+    name: str = Field(..., description="보호자 성명")
+    phoneNumber: str = Field(..., description="전화번호 (휴대전화)")
+    homePhone: str | None = Field(None, description="자택 전화번호")
+    address: str = Field(..., description="주소")
+    addressDetail: str | None = Field(None, description="상세 주소")
+    relationToChild: str = Field(..., description="이용자와의 관계 (부모, 담임교사 등)")
+
+
+class InstitutionInfo(BaseModel):
+    """기관/작성자 정보 (사회서비스 이용 추천서용).
+
+    테이블 3: 작성자 정보
+    """
+
+    institutionName: str = Field(..., description="소속기관명")
+    phoneNumber: str = Field(..., description="기관 연락처")
+    address: str = Field(..., description="기관 소재지")
+    addressDetail: str | None = Field(None, description="상세 주소")
+    writerPosition: str = Field(..., description="직 또는 자격 (담임교사, 사회복지사 등)")
+    writerName: str = Field(..., description="작성자 성명")
+    relationToChild: str = Field(..., description="이용자와의 관계")
+
+
 class IntegratedReportRequest(BaseModel):
     """통합 보고서 생성 요청.
 
@@ -95,6 +142,14 @@ class IntegratedReportRequest(BaseModel):
     kprc_summary: KprcSummary = Field(..., description="KPRC 검사소견")
     assessment_report_s3_key: str = Field(..., description="KPRC PDF S3 key")
 
+    # 사회서비스 이용 추천서 (Government Doc) 데이터 - Optional
+    guardian_info: GuardianInfo | None = Field(
+        None, description="보호자 정보 (사회서비스 이용 추천서용)"
+    )
+    institution_info: InstitutionInfo | None = Field(
+        None, description="기관/작성자 정보 (사회서비스 이용 추천서용)"
+    )
+
     class Config:
         """Pydantic 설정."""
 
@@ -114,6 +169,7 @@ class IntegratedReportRequest(BaseModel):
                         "gender": "MALE",
                         "age": 10,
                         "grade": "초4",
+                        "birthDate": {"year": 2015, "month": 3, "day": 15},
                     },
                     "careType": "PRIORITY",
                     "priorityReason": "BASIC_LIVELIHOOD",
@@ -134,6 +190,23 @@ class IntegratedReportRequest(BaseModel):
                     "confidenceScore": 0.85,
                 },
                 "assessment_report_s3_key": "assessment-reports/KPRC_홍길동_abc123.pdf",
+                "guardian_info": {
+                    "name": "홍부모",
+                    "phoneNumber": "010-1234-5678",
+                    "homePhone": "02-1234-5678",
+                    "address": "서울시 강남구 테헤란로 123",
+                    "addressDetail": "101동 1001호",
+                    "relationToChild": "부",
+                },
+                "institution_info": {
+                    "institutionName": "서울초등학교",
+                    "phoneNumber": "02-123-4567",
+                    "address": "서울시 강남구 학동로 456",
+                    "addressDetail": None,
+                    "writerPosition": "담임교사",
+                    "writerName": "김선생",
+                    "relationToChild": "담임교사",
+                },
             }
         }
 

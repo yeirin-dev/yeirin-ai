@@ -16,6 +16,7 @@ from yeirin_ai.domain.integrated_report.models import (
     IntegratedReportResult,
 )
 from yeirin_ai.infrastructure.document import CounselRequestDocxFiller, DocxToPdfConverter
+from yeirin_ai.infrastructure.document.government_docx_filler import GovernmentDocxFiller
 from yeirin_ai.infrastructure.pdf import PDFMerger
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,7 @@ class IntegratedReportService:
     def __init__(self) -> None:
         """서비스 초기화."""
         self.docx_filler = CounselRequestDocxFiller()
+        self.government_docx_filler = GovernmentDocxFiller()
         self.pdf_converter = DocxToPdfConverter()
         self.pdf_merger = PDFMerger()
 
@@ -81,25 +83,58 @@ class IntegratedReportService:
         )
 
         try:
-            # 1. DOCX 템플릿 채우기
-            step1_start = time.time()
-            logger.info("[INTEGRATED_REPORT] Step 1: DOCX 템플릿 채우기 시작...")
-            docx_bytes = self.docx_filler.fill_template(request)
-            step1_duration = time.time() - step1_start
-            logger.info(
-                "[INTEGRATED_REPORT] Step 1 완료: DOCX 생성",
-                extra={
-                    "docx_size": _format_bytes(len(docx_bytes)),
-                    "docx_size_bytes": len(docx_bytes),
-                    "duration": _format_duration(step1_duration),
-                },
+            # PDF 목록 (병합 순서: 사회서비스 이용 추천서 → 상담의뢰지 → KPRC)
+            pdfs_to_merge: list[bytes] = []
+            step_durations: dict[str, str] = {}
+
+            # 1. 사회서비스 이용 추천서 생성 (Optional: guardian_info 또는 institution_info가 있는 경우)
+            has_government_doc = request.guardian_info is not None or request.institution_info is not None
+            if has_government_doc:
+                step1_start = time.time()
+                logger.info("[INTEGRATED_REPORT] Step 1: 사회서비스 이용 추천서 생성 시작...")
+
+                # 1-1. Government DOCX 템플릿 채우기
+                government_docx_bytes = self.government_docx_filler.fill_template(request)
+                logger.debug(
+                    "[INTEGRATED_REPORT] 사회서비스 추천서 DOCX 생성 완료",
+                    extra={"docx_size": _format_bytes(len(government_docx_bytes))},
+                )
+
+                # 1-2. Government DOCX → PDF 변환
+                government_pdf_bytes = await self.pdf_converter.convert(government_docx_bytes)
+                pdfs_to_merge.append(government_pdf_bytes)
+
+                step1_duration = time.time() - step1_start
+                step_durations["government_doc"] = _format_duration(step1_duration)
+                logger.info(
+                    "[INTEGRATED_REPORT] Step 1 완료: 사회서비스 이용 추천서 PDF 생성",
+                    extra={
+                        "pdf_size": _format_bytes(len(government_pdf_bytes)),
+                        "pdf_size_bytes": len(government_pdf_bytes),
+                        "duration": _format_duration(step1_duration),
+                    },
+                )
+            else:
+                logger.info(
+                    "[INTEGRATED_REPORT] Step 1 건너뜀: 사회서비스 이용 추천서 데이터 없음",
+                    extra={"has_guardian_info": False, "has_institution_info": False},
+                )
+
+            # 2. 상담의뢰지 DOCX 템플릿 채우기
+            step2_start = time.time()
+            logger.info("[INTEGRATED_REPORT] Step 2: 상담의뢰지 DOCX 템플릿 채우기 시작...")
+            counsel_docx_bytes = self.docx_filler.fill_template(request)
+            logger.debug(
+                "[INTEGRATED_REPORT] 상담의뢰지 DOCX 생성 완료",
+                extra={"docx_size": _format_bytes(len(counsel_docx_bytes))},
             )
 
-            # 2. DOCX → PDF 변환 (Gotenberg)
-            step2_start = time.time()
-            logger.info("[INTEGRATED_REPORT] Step 2: DOCX → PDF 변환 시작 (Gotenberg)...")
-            counsel_pdf_bytes = await self.pdf_converter.convert(docx_bytes)
+            # 2-2. 상담의뢰지 DOCX → PDF 변환 (Gotenberg)
+            counsel_pdf_bytes = await self.pdf_converter.convert(counsel_docx_bytes)
+            pdfs_to_merge.append(counsel_pdf_bytes)
+
             step2_duration = time.time() - step2_start
+            step_durations["counsel_request"] = _format_duration(step2_duration)
             logger.info(
                 "[INTEGRATED_REPORT] Step 2 완료: 상담의뢰지 PDF 생성",
                 extra={
@@ -116,7 +151,10 @@ class IntegratedReportService:
                 extra={"s3_key": request.assessment_report_s3_key},
             )
             kprc_pdf_bytes = await self._download_kprc_pdf(request.assessment_report_s3_key)
+            pdfs_to_merge.append(kprc_pdf_bytes)
+
             step3_duration = time.time() - step3_start
+            step_durations["kprc_download"] = _format_duration(step3_duration)
             logger.info(
                 "[INTEGRATED_REPORT] Step 3 완료: KPRC PDF 다운로드",
                 extra={
@@ -126,22 +164,29 @@ class IntegratedReportService:
                 },
             )
 
-            # 4. PDF 병합 (상담의뢰지 + KPRC) using PyMuPDF
+            # 4. PDF 병합 (사회서비스 추천서 + 상담의뢰지 + KPRC) using PyMuPDF
             step4_start = time.time()
+            pdf_count = len(pdfs_to_merge)
+            merge_description = (
+                "사회서비스 추천서 + 상담의뢰지 + KPRC"
+                if has_government_doc
+                else "상담의뢰지 + KPRC"
+            )
             logger.info(
-                "[INTEGRATED_REPORT] Step 4: PDF 병합 시작 (PyMuPDF)...",
+                f"[INTEGRATED_REPORT] Step 4: PDF 병합 시작 (PyMuPDF) - {merge_description}...",
                 extra={
-                    "counsel_pdf_size": _format_bytes(len(counsel_pdf_bytes)),
-                    "kprc_pdf_size": _format_bytes(len(kprc_pdf_bytes)),
+                    "pdf_count": pdf_count,
+                    "pdf_sizes": [_format_bytes(len(pdf)) for pdf in pdfs_to_merge],
                 },
             )
             merged_pdf_bytes = self.pdf_merger.merge_with_metadata(
-                pdfs=[counsel_pdf_bytes, kprc_pdf_bytes],
+                pdfs=pdfs_to_merge,
                 title=f"통합 보고서 - {request.child_name}",
                 author="예이린 AI 시스템",
-                subject="상담의뢰지 및 KPRC 검사 통합 보고서",
+                subject="사회서비스 이용 추천서, 상담의뢰지 및 KPRC 검사 통합 보고서",
             )
             step4_duration = time.time() - step4_start
+            step_durations["pdf_merge"] = _format_duration(step4_duration)
             logger.info(
                 "[INTEGRATED_REPORT] Step 4 완료: PDF 병합",
                 extra={
@@ -169,6 +214,7 @@ class IntegratedReportService:
                 filename=output_filename,
             )
             step5_duration = time.time() - step5_start
+            step_durations["s3_upload"] = _format_duration(step5_duration)
             logger.info(
                 "[INTEGRATED_REPORT] Step 5 완료: S3 업로드",
                 extra={
@@ -184,13 +230,9 @@ class IntegratedReportService:
                     "counsel_request_id": request.counsel_request_id,
                     "s3_key": s3_key,
                     "total_duration": _format_duration(total_duration),
-                    "step_durations": {
-                        "docx_fill": _format_duration(step1_duration),
-                        "pdf_convert": _format_duration(step2_duration),
-                        "kprc_download": _format_duration(step3_duration),
-                        "pdf_merge": _format_duration(step4_duration),
-                        "s3_upload": _format_duration(step5_duration),
-                    },
+                    "has_government_doc": has_government_doc,
+                    "pdf_count": pdf_count,
+                    "step_durations": step_durations,
                 },
             )
 
