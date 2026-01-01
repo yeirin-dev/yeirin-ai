@@ -194,7 +194,8 @@ class GovernmentDocxFiller:
         """
         motivation = request.request_motivation
         psych = request.psychological_info
-        kprc = request.kprc_summary
+        # 하위 호환 API 사용
+        kprc = request.get_kprc_summary_for_doc()
 
         # Row 0, Col 1: ① 추천사유
         if len(table.rows) > 0 and len(table.rows[0].cells) > 1:
@@ -206,9 +207,21 @@ class GovernmentDocxFiller:
         if len(table.rows) > 1 and len(table.rows[1].cells) > 1:
             judgment_basis_parts = []
 
-            # 심리검사 결과
-            if kprc.expertOpinion:
-                judgment_basis_parts.append(f"[심리검사 결과]\n{kprc.expertOpinion}")
+            # KPRC 심리검사 결과
+            if kprc and kprc.expertOpinion:
+                judgment_basis_parts.append(f"[KPRC 검사 결과]\n{kprc.expertOpinion}")
+
+            # 추가 검사 결과 (CRTES-R, SDQ-A)
+            if request.attached_assessments:
+                for assessment in request.attached_assessments:
+                    # KPRC는 이미 처리됨
+                    if assessment.assessmentType == "KPRC_CO_SG_E":
+                        continue
+                    if assessment.summary and assessment.summary.expertOpinion:
+                        judgment_basis_parts.append(
+                            f"\n\n[{assessment.assessmentName} 결과]\n"
+                            f"{assessment.summary.expertOpinion}"
+                        )
 
             # 관찰 내용 (특이사항)
             if psych.specialNotes:
@@ -249,22 +262,43 @@ class GovernmentDocxFiller:
                 if motivation.goals:
                     opinion_parts.append(f"[상담 목표]\n{motivation.goals}")
 
-                # 권장사항
-                if kprc.recommendations:
+                # KPRC 권장사항
+                if kprc and kprc.recommendations:
                     recommendations_text = "\n".join(
                         f"• {rec}" for rec in kprc.recommendations
                     )
-                    opinion_parts.append(f"\n\n[권장사항]\n{recommendations_text}")
+                    opinion_parts.append(f"\n\n[KPRC 권장사항]\n{recommendations_text}")
 
-                # 핵심 발견사항
-                if kprc.keyFindings:
+                # KPRC 핵심 발견사항
+                if kprc and kprc.keyFindings:
                     findings_text = "\n".join(f"• {f}" for f in kprc.keyFindings)
-                    opinion_parts.append(f"\n\n[핵심 발견사항]\n{findings_text}")
+                    opinion_parts.append(f"\n\n[KPRC 핵심 발견사항]\n{findings_text}")
+
+                # 추가 검사 권장사항 (CRTES-R, SDQ-A)
+                if request.attached_assessments:
+                    for assessment in request.attached_assessments:
+                        if assessment.assessmentType == "KPRC_CO_SG_E":
+                            continue
+                        if assessment.summary:
+                            if assessment.summary.recommendations:
+                                rec_text = "\n".join(
+                                    f"• {rec}" for rec in assessment.summary.recommendations
+                                )
+                                opinion_parts.append(
+                                    f"\n\n[{assessment.assessmentName} 권장사항]\n{rec_text}"
+                                )
+                            if assessment.summary.keyFindings:
+                                findings_text = "\n".join(
+                                    f"• {f}" for f in assessment.summary.keyFindings
+                                )
+                                opinion_parts.append(
+                                    f"\n\n[{assessment.assessmentName} 핵심 발견사항]\n{findings_text}"
+                                )
 
                 opinion = "".join(opinion_parts) if opinion_parts else ""
 
                 logger.info(
-                    "기존 KPRC 기반 추천자 의견 사용 (fallback)",
+                    "검사결과 기반 추천자 의견 사용 (fallback)",
                     extra={"opinion_length": len(opinion)},
                 )
 

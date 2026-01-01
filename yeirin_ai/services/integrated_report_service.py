@@ -79,12 +79,14 @@ class IntegratedReportService:
             생성 결과 (S3 key 포함)
         """
         total_start = time.time()
+        assessment_keys = request.get_assessment_pdfs_s3_keys()
         logger.info(
             "[INTEGRATED_REPORT] 처리 시작",
             extra={
                 "counsel_request_id": request.counsel_request_id,
                 "child_name": request.child_name,
-                "assessment_report_s3_key": request.assessment_report_s3_key,
+                "assessment_count": len(assessment_keys),
+                "assessment_types": [t for t, _ in assessment_keys],
             },
         )
 
@@ -194,33 +196,51 @@ class IntegratedReportService:
                 },
             )
 
-            # 3. KPRC PDF 다운로드 (S3 via yeirin presigned URL)
+            # 3. 검사 결과 PDF 다운로드 (S3 via yeirin presigned URL)
             step3_start = time.time()
+            assessment_s3_keys = request.get_assessment_pdfs_s3_keys()
+            assessment_count = len(assessment_s3_keys)
+
             logger.info(
-                "[INTEGRATED_REPORT] Step 3: KPRC PDF 다운로드 시작...",
-                extra={"s3_key": request.assessment_report_s3_key},
+                "[INTEGRATED_REPORT] Step 3: 검사 결과 PDF 다운로드 시작...",
+                extra={
+                    "assessment_count": assessment_count,
+                    "assessment_types": [t for t, _ in assessment_s3_keys],
+                },
             )
-            kprc_pdf_bytes = await self._download_kprc_pdf(request.assessment_report_s3_key)
-            pdfs_to_merge.append(kprc_pdf_bytes)
+
+            assessment_pdfs: list[bytes] = []
+            for assessment_type, s3_key in assessment_s3_keys:
+                logger.debug(
+                    f"[INTEGRATED_REPORT] {assessment_type} PDF 다운로드 중...",
+                    extra={"s3_key": s3_key},
+                )
+                pdf_bytes = await self._download_assessment_pdf(s3_key, assessment_type)
+                assessment_pdfs.append(pdf_bytes)
+                pdfs_to_merge.append(pdf_bytes)
 
             step3_duration = time.time() - step3_start
-            step_durations["kprc_download"] = _format_duration(step3_duration)
+            step_durations["assessment_download"] = _format_duration(step3_duration)
             logger.info(
-                "[INTEGRATED_REPORT] Step 3 완료: KPRC PDF 다운로드",
+                "[INTEGRATED_REPORT] Step 3 완료: 검사 결과 PDF 다운로드",
                 extra={
-                    "pdf_size": _format_bytes(len(kprc_pdf_bytes)),
-                    "pdf_size_bytes": len(kprc_pdf_bytes),
+                    "assessment_count": assessment_count,
+                    "total_size": _format_bytes(sum(len(pdf) for pdf in assessment_pdfs)),
                     "duration": _format_duration(step3_duration),
                 },
             )
 
-            # 4. PDF 병합 (사회서비스 추천서 + 상담의뢰지 + KPRC) using PyMuPDF
+            # 4. PDF 병합 using PyMuPDF
             step4_start = time.time()
             pdf_count = len(pdfs_to_merge)
+
+            # 병합 설명 생성
+            assessment_type_names = [t for t, _ in assessment_s3_keys]
+            assessments_desc = " + ".join(assessment_type_names) if assessment_type_names else "검사 결과"
             merge_description = (
-                "사회서비스 추천서 + 상담의뢰지 + KPRC"
+                f"사회서비스 추천서 + 상담의뢰지 + {assessments_desc}"
                 if has_government_doc
-                else "상담의뢰지 + KPRC"
+                else f"상담의뢰지 + {assessments_desc}"
             )
             logger.info(
                 f"[INTEGRATED_REPORT] Step 4: PDF 병합 시작 (PyMuPDF) - {merge_description}...",
@@ -233,7 +253,7 @@ class IntegratedReportService:
                 pdfs=pdfs_to_merge,
                 title=f"통합 보고서 - {request.child_name}",
                 author="예이린 AI 시스템",
-                subject="사회서비스 이용 추천서, 상담의뢰지 및 KPRC 검사 통합 보고서",
+                subject=f"상담의뢰지 및 심리검사({assessments_desc}) 통합 보고서",
             )
             step4_duration = time.time() - step4_start
             step_durations["pdf_merge"] = _format_duration(step4_duration)
@@ -281,6 +301,8 @@ class IntegratedReportService:
                     "s3_key": s3_key,
                     "total_duration": _format_duration(total_duration),
                     "has_government_doc": has_government_doc,
+                    "assessment_count": assessment_count,
+                    "assessment_types": assessment_type_names,
                     "pdf_count": pdf_count,
                     "step_durations": step_durations,
                 },
@@ -310,14 +332,17 @@ class IntegratedReportService:
                 error_message=error_msg,
             )
 
-    async def _download_kprc_pdf(self, s3_key: str) -> bytes:
-        """KPRC PDF를 S3에서 다운로드합니다.
+    async def _download_assessment_pdf(
+        self, s3_key: str, assessment_type: str = "UNKNOWN"
+    ) -> bytes:
+        """검사 결과 PDF를 S3에서 다운로드합니다.
 
         yeirin 백엔드의 presigned URL API를 통해
         S3 key로부터 presigned URL을 생성하고 다운로드합니다.
 
         Args:
-            s3_key: KPRC PDF의 S3 객체 키
+            s3_key: 검사 결과 PDF의 S3 객체 키
+            assessment_type: 검사 유형 (로깅용, KPRC_CO_SG_E, CRTES_R, SDQ_A)
 
         Returns:
             PDF 바이트 데이터
@@ -325,17 +350,19 @@ class IntegratedReportService:
         Raises:
             IntegratedReportServiceError: 다운로드 실패 시
         """
+        log_prefix = f"[ASSESSMENT_DOWNLOAD:{assessment_type}]"
+
         try:
             # 1. Presigned URL 생성 (yeirin 백엔드 API)
             logger.debug(
-                "[KPRC_DOWNLOAD] Presigned URL 생성 요청",
+                f"{log_prefix} Presigned URL 생성 요청",
                 extra={"s3_key": s3_key},
             )
             presigned_url_start = time.time()
             presigned_url = await self._get_presigned_url(s3_key)
             presigned_url_duration = time.time() - presigned_url_start
             logger.debug(
-                "[KPRC_DOWNLOAD] Presigned URL 생성 완료",
+                f"{log_prefix} Presigned URL 생성 완료",
                 extra={"duration": _format_duration(presigned_url_duration)},
             )
 
@@ -349,10 +376,12 @@ class IntegratedReportService:
                 download_duration = time.time() - download_start
 
                 if not pdf_bytes:
-                    raise IntegratedReportServiceError("다운로드된 PDF가 비어있습니다")
+                    raise IntegratedReportServiceError(
+                        f"다운로드된 {assessment_type} PDF가 비어있습니다"
+                    )
 
                 logger.debug(
-                    "[KPRC_DOWNLOAD] PDF 다운로드 완료",
+                    f"{log_prefix} PDF 다운로드 완료",
                     extra={
                         "size": _format_bytes(len(pdf_bytes)),
                         "duration": _format_duration(download_duration),
@@ -363,23 +392,25 @@ class IntegratedReportService:
 
         except httpx.HTTPStatusError as e:
             logger.error(
-                "[KPRC_DOWNLOAD] HTTP 에러",
+                f"{log_prefix} HTTP 에러",
                 extra={
                     "status_code": e.response.status_code,
                     "s3_key": s3_key,
                 },
             )
             raise IntegratedReportServiceError(
-                f"KPRC PDF 다운로드 HTTP 에러: {e.response.status_code}"
+                f"{assessment_type} PDF 다운로드 HTTP 에러: {e.response.status_code}"
             ) from e
         except Exception as e:
             if isinstance(e, IntegratedReportServiceError):
                 raise
             logger.error(
-                "[KPRC_DOWNLOAD] 다운로드 실패",
+                f"{log_prefix} 다운로드 실패",
                 extra={"s3_key": s3_key, "error": str(e)},
             )
-            raise IntegratedReportServiceError(f"KPRC PDF 다운로드 실패: {e}") from e
+            raise IntegratedReportServiceError(
+                f"{assessment_type} PDF 다운로드 실패: {e}"
+            ) from e
 
     async def _get_presigned_url(self, s3_key: str) -> str:
         """yeirin 백엔드를 통해 S3 Presigned URL을 생성합니다.

@@ -319,15 +319,21 @@ class CounselRequestDocxFiller:
         테이블 구조:
         - Row 0: 예이린 AI 종합소견 (헤더)
         - Row 1: (내용)
+
+        Note: 다중 검사 지원 - KPRC 외에 CRTES-R, SDQ-A 검사 결과가 있으면
+        각 검사별 요약을 추가합니다.
         """
-        kprc = request.kprc_summary
-
         # Row 1, Col 0: AI 종합소견 내용
-        if len(table.rows) > 1:
-            cell = table.rows[1].cells[0]
+        if len(table.rows) <= 1:
+            return
 
-            # 소견 내용 구성
-            content_parts = []
+        cell = table.rows[1].cells[0]
+        content_parts: list[str] = []
+
+        # KPRC 소견 (하위 호환 API 사용)
+        kprc = request.get_kprc_summary_for_doc()
+        if kprc:
+            content_parts.append("[KPRC 검사 소견]")
 
             # 전문가 소견
             if kprc.expertOpinion:
@@ -335,28 +341,68 @@ class CounselRequestDocxFiller:
 
             # 요약
             if kprc.summaryLines:
-                content_parts.append("\n\n[요약]")
+                content_parts.append("\n[요약]")
                 for line in kprc.summaryLines:
                     content_parts.append(f"• {line}")
 
             # 핵심 발견사항
             if kprc.keyFindings:
-                content_parts.append("\n\n[핵심 발견사항]")
+                content_parts.append("\n[핵심 발견사항]")
                 for finding in kprc.keyFindings:
                     content_parts.append(f"• {finding}")
 
             # 권장사항
             if kprc.recommendations:
-                content_parts.append("\n\n[권장사항]")
+                content_parts.append("\n[권장사항]")
                 for rec in kprc.recommendations:
                     content_parts.append(f"• {rec}")
 
-            # 나눔고딕 폰트로 셀 채우기
-            self._set_cell_text_with_font(cell, "\n".join(content_parts), font_size=10)
+        # 추가 검사 소견 (CRTES-R, SDQ-A)
+        if request.attached_assessments:
+            for assessment in request.attached_assessments:
+                if assessment.assessmentType == "KPRC_CO_SG_E":
+                    continue  # KPRC는 이미 처리됨
 
-            # 셀 스타일 설정 (정렬)
-            for para in cell.paragraphs:
-                para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                if assessment.summary:
+                    summary = assessment.summary
+
+                    # 검사명으로 섹션 헤더 추가
+                    if content_parts:
+                        content_parts.append("\n\n")
+                    content_parts.append(f"[{assessment.assessmentName} 검사 소견]")
+
+                    # 전문가 소견
+                    if summary.expertOpinion:
+                        content_parts.append(summary.expertOpinion)
+
+                    # 요약
+                    if summary.summaryLines:
+                        content_parts.append("\n[요약]")
+                        for line in summary.summaryLines:
+                            content_parts.append(f"• {line}")
+
+                    # 핵심 발견사항
+                    if summary.keyFindings:
+                        content_parts.append("\n[핵심 발견사항]")
+                        for finding in summary.keyFindings:
+                            content_parts.append(f"• {finding}")
+
+                    # 권장사항
+                    if summary.recommendations:
+                        content_parts.append("\n[권장사항]")
+                        for rec in summary.recommendations:
+                            content_parts.append(f"• {rec}")
+
+        # 내용이 없으면 기본 메시지
+        if not content_parts:
+            content_parts.append("검사 소견이 없습니다.")
+
+        # 나눔고딕 폰트로 셀 채우기
+        self._set_cell_text_with_font(cell, "\n".join(content_parts), font_size=10)
+
+        # 셀 스타일 설정 (정렬)
+        for para in cell.paragraphs:
+            para.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
     def _fill_consent(self, doc: Document) -> None:
         """동의 체크박스를 처리합니다.

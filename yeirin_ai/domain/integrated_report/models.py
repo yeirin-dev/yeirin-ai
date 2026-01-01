@@ -78,14 +78,79 @@ class RequestMotivation(BaseModel):
     goals: str = Field(..., description="보호자 및 의뢰자의 목표")
 
 
-class KprcSummary(BaseModel):
-    """KPRC 검사소견 (yeirin-ai 생성)."""
+# =============================================================================
+# 검사 유형 상수
+# =============================================================================
+
+ASSESSMENT_TYPES = {
+    "KPRC": "KPRC_CO_SG_E",
+    "CRTES_R": "CRTES_R",
+    "SDQ_A": "SDQ_A",
+}
+
+
+# =============================================================================
+# 검사 소견 모델
+# =============================================================================
+
+
+class BaseAssessmentSummary(BaseModel):
+    """공통 검사소견 필드."""
 
     summaryLines: list[str] | None = Field(None, description="요약 문장 (최대 5줄)")
     expertOpinion: str | None = Field(None, description="전문가 소견")
     keyFindings: list[str] | None = Field(None, description="핵심 발견 사항")
     recommendations: list[str] | None = Field(None, description="권장 사항")
     confidenceScore: float | None = Field(None, ge=0.0, le=1.0, description="신뢰도 점수")
+
+
+class KprcSummary(BaseAssessmentSummary):
+    """KPRC 검사소견 (yeirin-ai 생성)."""
+
+    assessmentType: Literal["KPRC_CO_SG_E"] | None = Field(None, description="검사 유형")
+
+
+class CrtesRSummary(BaseAssessmentSummary):
+    """CRTES-R 검사소견 (아동 외상 반응 척도)."""
+
+    assessmentType: Literal["CRTES_R"] = Field("CRTES_R", description="검사 유형")
+    totalScore: int | None = Field(None, ge=0, le=115, description="총점")
+    riskLevel: Literal["normal", "caution", "high_risk"] | None = Field(None, description="위험 수준")
+
+
+class SdqASummary(BaseAssessmentSummary):
+    """SDQ-A 검사소견 (강점·난점 설문지)."""
+
+    assessmentType: Literal["SDQ_A"] = Field("SDQ_A", description="검사 유형")
+    difficultiesScore: int | None = Field(None, ge=0, le=40, description="난점 총점")
+    strengthsScore: int | None = Field(None, ge=0, le=10, description="강점 총점")
+    difficultiesLevel: Literal["normal", "borderline", "abnormal"] | None = Field(
+        None, description="난점 수준"
+    )
+    strengthsLevel: Literal["normal", "borderline", "abnormal"] | None = Field(
+        None, description="강점 수준"
+    )
+
+
+# =============================================================================
+# 첨부 검사 결과 모델
+# =============================================================================
+
+
+class AttachedAssessment(BaseModel):
+    """첨부된 개별 검사 결과 정보."""
+
+    assessmentType: str = Field(..., description="검사 유형 (KPRC_CO_SG_E, CRTES_R, SDQ_A)")
+    assessmentName: str = Field(..., description="검사명 (예: KPRC 인성평정척도)")
+    reportS3Key: str = Field(..., description="검사 결과 PDF S3 키")
+    resultId: str = Field(..., description="검사 결과 ID")
+    totalScore: int | None = Field(None, description="총점")
+    maxScore: int | None = Field(None, description="만점")
+    overallLevel: Literal["normal", "caution", "clinical"] | None = Field(
+        None, description="전반적 수준"
+    )
+    scoredAt: str | None = Field(None, description="채점 일시")
+    summary: BaseAssessmentSummary | None = Field(None, description="AI 생성 요약")
 
 
 # =============================================================================
@@ -138,9 +203,19 @@ class IntegratedReportRequest(BaseModel):
     psychological_info: PsychologicalInfo = Field(..., description="정서심리 정보")
     request_motivation: RequestMotivation = Field(..., description="의뢰 동기")
 
-    # KPRC 검사 데이터 (필수)
-    kprc_summary: KprcSummary = Field(..., description="KPRC 검사소견")
-    assessment_report_s3_key: str = Field(..., description="KPRC PDF S3 key")
+    # 첨부된 검사 결과들 (최대 3개: KPRC, CRTES-R, SDQ-A)
+    attached_assessments: list[AttachedAssessment] | None = Field(
+        None, description="첨부된 검사 결과 목록 (최대 3개)"
+    )
+
+    # ⚠️ 하위 호환성: 기존 필드 유지 (deprecated)
+    # 새 코드에서는 attached_assessments 사용
+    kprc_summary: KprcSummary | None = Field(
+        None, description="[Deprecated] KPRC 검사소견 (attached_assessments 사용 권장)"
+    )
+    assessment_report_s3_key: str | None = Field(
+        None, description="[Deprecated] KPRC PDF S3 key (attached_assessments 사용 권장)"
+    )
 
     # 사회서비스 이용 추천서 (Government Doc) 데이터 - Optional
     guardian_info: GuardianInfo | None = Field(
@@ -149,6 +224,48 @@ class IntegratedReportRequest(BaseModel):
     institution_info: InstitutionInfo | None = Field(
         None, description="기관/작성자 정보 (사회서비스 이용 추천서용)"
     )
+
+    def get_assessment_pdfs_s3_keys(self) -> list[tuple[str, str]]:
+        """모든 검사 결과 PDF의 S3 키를 반환합니다.
+
+        Returns:
+            (검사 유형, S3 키) 튜플 리스트
+        """
+        s3_keys: list[tuple[str, str]] = []
+
+        # 새 방식: attached_assessments 사용
+        if self.attached_assessments:
+            for assessment in self.attached_assessments:
+                s3_keys.append((assessment.assessmentType, assessment.reportS3Key))
+
+        # 하위 호환: legacy 필드 사용 (attached_assessments가 없는 경우)
+        elif self.assessment_report_s3_key:
+            s3_keys.append(("KPRC_CO_SG_E", self.assessment_report_s3_key))
+
+        return s3_keys
+
+    def get_kprc_summary_for_doc(self) -> KprcSummary | None:
+        """문서 생성용 KPRC 요약을 반환합니다.
+
+        attached_assessments에서 KPRC를 찾거나, legacy 필드를 사용합니다.
+
+        Returns:
+            KPRC 검사소견 또는 None
+        """
+        # 새 방식: attached_assessments에서 KPRC 찾기
+        if self.attached_assessments:
+            for assessment in self.attached_assessments:
+                if assessment.assessmentType == "KPRC_CO_SG_E" and assessment.summary:
+                    return KprcSummary(
+                        summaryLines=assessment.summary.summaryLines,
+                        expertOpinion=assessment.summary.expertOpinion,
+                        keyFindings=assessment.summary.keyFindings,
+                        recommendations=assessment.summary.recommendations,
+                        confidenceScore=assessment.summary.confidenceScore,
+                    )
+
+        # 하위 호환: legacy 필드 사용
+        return self.kprc_summary
 
     class Config:
         """Pydantic 설정."""
