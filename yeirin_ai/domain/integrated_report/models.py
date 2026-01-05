@@ -56,12 +56,51 @@ class ChildInfo(BaseModel):
     birthDate: BirthDate | None = Field(None, description="생년월일 (government doc용)")
 
 
+class ProtectedChildInfo(BaseModel):
+    """보호대상 아동 정보.
+
+    새 문서 포맷의 '보호대상 아동 기준' 섹션에서 사용됩니다.
+    - 아동 양육시설 (CHILD_FACILITY)
+    - 공동생활가정/그룹홈 (GROUP_HOME)
+    """
+
+    type: Literal["CHILD_FACILITY", "GROUP_HOME"] | None = Field(
+        None, description="보호대상 유형 (아동양육시설/공동생활가정)"
+    )
+    reason: Literal[
+        "GUARDIAN_ABSENCE", "ABUSE", "ILLNESS_RUNAWAY", "LOCAL_GOVERNMENT"
+    ] | None = Field(None, description="보호 사유")
+
+    @property
+    def type_korean(self) -> str:
+        """보호대상 유형 한국어."""
+        type_map = {
+            "CHILD_FACILITY": "아동 양육시설",
+            "GROUP_HOME": "공동생활가정(그룹홈)",
+        }
+        return type_map.get(self.type or "", "")
+
+    @property
+    def reason_korean(self) -> str:
+        """보호 사유 한국어."""
+        reason_map = {
+            "GUARDIAN_ABSENCE": "보호자 없거나 이탈",
+            "ABUSE": "아동학대",
+            "ILLNESS_RUNAWAY": "보호자 질병 또는 아동 가출",
+            "LOCAL_GOVERNMENT": "지자체장 인정",
+        }
+        return reason_map.get(self.reason or "", "")
+
+
 class BasicInfo(BaseModel):
     """기본 정보."""
 
     childInfo: ChildInfo = Field(..., description="아동 정보")
     careType: str = Field(..., description="센터 이용 기준")
     priorityReason: str | None = Field(None, description="우선돌봄 세부 사유")
+    protectedChildInfo: ProtectedChildInfo | None = Field(
+        None, description="보호대상 아동 정보 (새 문서 포맷)"
+    )
 
 
 class PsychologicalInfo(BaseModel):
@@ -111,25 +150,67 @@ class KprcSummary(BaseAssessmentSummary):
 
 
 class CrtesRSummary(BaseAssessmentSummary):
-    """CRTES-R 검사소견 (아동 외상 반응 척도)."""
+    """CRTES-R 검사소견 (아동 외상 반응 척도).
+
+    아동이 경험한 스트레스 상황에 대한 정서적 반응을 측정합니다.
+    """
 
     assessmentType: Literal["CRTES_R"] = Field("CRTES_R", description="검사 유형")
     totalScore: int | None = Field(None, ge=0, le=115, description="총점")
-    riskLevel: Literal["normal", "caution", "high_risk"] | None = Field(None, description="위험 수준")
+    riskLevel: Literal["normal", "caution", "high_risk"] | None = Field(
+        None, description="위험 수준"
+    )
+    riskLevelDescription: str | None = Field(
+        None, description="위험 수준 설명"
+    )
+
+    @property
+    def risk_level_korean(self) -> str:
+        """위험 수준 한국어 텍스트."""
+        level_map = {
+            "normal": "정상 범위",
+            "caution": "주의 필요",
+            "high_risk": "고위험",
+        }
+        return level_map.get(self.riskLevel or "", "미정")
 
 
 class SdqASummary(BaseAssessmentSummary):
-    """SDQ-A 검사소견 (강점·난점 설문지)."""
+    """SDQ-A 검사소견 (강점·난점 설문지).
+
+    새 문서 포맷에서는 강점/난점을 분리하여 표시합니다:
+    - 강점 (사회지향 행동): 0-10점, Level 1-3
+    - 난점 (외현화/내현화): 0-40점, Level 1-3
+    """
 
     assessmentType: Literal["SDQ_A"] = Field("SDQ_A", description="검사 유형")
-    difficultiesScore: int | None = Field(None, ge=0, le=40, description="난점 총점")
+
+    # 강점 (사회지향 행동)
     strengthsScore: int | None = Field(None, ge=0, le=10, description="강점 총점")
-    difficultiesLevel: Literal["normal", "borderline", "abnormal"] | None = Field(
-        None, description="난점 수준"
+    strengthsLevel: int | None = Field(None, ge=1, le=3, description="강점 수준 (1-3)")
+    strengthsLevelDescription: str | None = Field(
+        None, description="강점 수준 설명 (예: '타인의 감정을 잘 헤아리고...')"
     )
-    strengthsLevel: Literal["normal", "borderline", "abnormal"] | None = Field(
-        None, description="강점 수준"
+
+    # 난점 (외현화 + 내현화)
+    difficultiesScore: int | None = Field(None, ge=0, le=40, description="난점 총점")
+    difficultiesLevel: int | None = Field(None, ge=1, le=3, description="난점 수준 (1-3)")
+    difficultiesLevelDescription: str | None = Field(
+        None, description="난점 수준 설명 (예: '또래관계와 감정, 행동의 조절에...')"
     )
+
+    # 하위 호환성을 위한 별칭 프로퍼티
+    @property
+    def strengths_level_text(self) -> str:
+        """강점 수준 텍스트."""
+        level_map = {1: "양호", 2: "경계선", 3: "주의 필요"}
+        return level_map.get(self.strengthsLevel or 0, "미정")
+
+    @property
+    def difficulties_level_text(self) -> str:
+        """난점 수준 텍스트."""
+        level_map = {1: "양호", 2: "경계선", 3: "주의 필요"}
+        return level_map.get(self.difficultiesLevel or 0, "미정")
 
 
 # =============================================================================
@@ -142,7 +223,7 @@ class AttachedAssessment(BaseModel):
 
     assessmentType: str = Field(..., description="검사 유형 (KPRC_CO_SG_E, CRTES_R, SDQ_A)")
     assessmentName: str = Field(..., description="검사명 (예: KPRC 인성평정척도)")
-    reportS3Key: str = Field(..., description="검사 결과 PDF S3 키")
+    reportS3Key: str | None = Field(None, description="검사 결과 PDF S3 키 (KPRC만 있음, CRTES-R/SDQ-A는 없음)")
     resultId: str = Field(..., description="검사 결과 ID")
     totalScore: int | None = Field(None, description="총점")
     maxScore: int | None = Field(None, description="만점")
@@ -187,6 +268,52 @@ class InstitutionInfo(BaseModel):
     relationToChild: str = Field(..., description="이용자와의 관계")
 
 
+# =============================================================================
+# AI 대화 분석 모델
+# =============================================================================
+
+
+class ConversationAnalysis(BaseModel):
+    """Soul-E AI 대화 분석 결과.
+
+    새 문서 포맷의 '4.2 AI 기반 아동 마음건강 대화 분석 요약' 섹션에서 사용됩니다.
+    """
+
+    # 3줄 요약 (예이린 스타일)
+    summaryLines: list[str] | None = Field(
+        None, description="3줄 요약 (긍정적 특성/관심 영역/기대 성장)"
+    )
+
+    # 전문가 종합 분석 (3-4문장)
+    expertAnalysis: str | None = Field(
+        None, description="전문가 종합 분석 (3-4문장)"
+    )
+
+    # 주요 관찰 사항
+    keyObservations: list[str] | None = Field(
+        None, description="대화에서 발견된 주요 특성 (2-3가지)"
+    )
+
+    # 정서 상태 키워드
+    emotionalKeywords: list[str] | None = Field(
+        None, description="정서 상태 키워드 (예: 불안, 또래갈등)"
+    )
+
+    # 권장 상담 영역
+    recommendedFocusAreas: list[str] | None = Field(
+        None, description="권장 상담 영역 (2-3가지)"
+    )
+
+    # 분석 신뢰도
+    confidenceScore: float | None = Field(
+        None, ge=0.0, le=1.0, description="분석 신뢰도 (0.0 ~ 1.0)"
+    )
+
+    # 대화 세션/메시지 수 (참고용)
+    sessionCount: int | None = Field(None, description="대화 세션 수")
+    messageCount: int | None = Field(None, description="대화 메시지 수")
+
+
 class IntegratedReportRequest(BaseModel):
     """통합 보고서 생성 요청.
 
@@ -225,18 +352,26 @@ class IntegratedReportRequest(BaseModel):
         None, description="기관/작성자 정보 (사회서비스 이용 추천서용)"
     )
 
+    # Soul-E AI 대화 분석 결과 (새 문서 포맷)
+    conversationAnalysis: ConversationAnalysis | None = Field(
+        None, description="AI 대화 분석 결과 (섹션 4.2)"
+    )
+
     def get_assessment_pdfs_s3_keys(self) -> list[tuple[str, str]]:
         """모든 검사 결과 PDF의 S3 키를 반환합니다.
+
+        CRTES-R, SDQ-A는 PDF가 없으므로 제외됩니다.
 
         Returns:
             (검사 유형, S3 키) 튜플 리스트
         """
         s3_keys: list[tuple[str, str]] = []
 
-        # 새 방식: attached_assessments 사용
+        # 새 방식: attached_assessments 사용 (PDF가 있는 것만)
         if self.attached_assessments:
             for assessment in self.attached_assessments:
-                s3_keys.append((assessment.assessmentType, assessment.reportS3Key))
+                if assessment.reportS3Key:
+                    s3_keys.append((assessment.assessmentType, assessment.reportS3Key))
 
         # 하위 호환: legacy 필드 사용 (attached_assessments가 없는 경우)
         elif self.assessment_report_s3_key:
