@@ -26,6 +26,18 @@ class RequestDate(BaseModel):
         return f"{self.year}년 {self.month}월 {self.day}일"
 
 
+class BirthDate(BaseModel):
+    """생년월일."""
+
+    year: int = Field(..., description="년도")
+    month: int = Field(..., ge=1, le=12, description="월")
+    day: int = Field(..., ge=1, le=31, description="일")
+
+    def to_korean_string(self) -> str:
+        """한국어 날짜 문자열로 변환 (YYYY년 MM월 DD일)."""
+        return f"{self.year}년 {self.month}월 {self.day}일"
+
+
 class CoverInfo(BaseModel):
     """표지 정보."""
 
@@ -41,6 +53,43 @@ class ChildInfo(BaseModel):
     gender: str = Field(..., description="성별 (MALE/FEMALE)")
     age: int = Field(..., ge=0, description="연령")
     grade: str = Field(..., description="학년")
+    birthDate: BirthDate | None = Field(None, description="생년월일 (government doc용)")
+
+
+class ProtectedChildInfo(BaseModel):
+    """보호대상 아동 정보.
+
+    새 문서 포맷의 '보호대상 아동 기준' 섹션에서 사용됩니다.
+    - 아동 양육시설 (CHILD_FACILITY)
+    - 공동생활가정/그룹홈 (GROUP_HOME)
+    """
+
+    type: Literal["CHILD_FACILITY", "GROUP_HOME"] | None = Field(
+        None, description="보호대상 유형 (아동양육시설/공동생활가정)"
+    )
+    reason: Literal[
+        "GUARDIAN_ABSENCE", "ABUSE", "ILLNESS_RUNAWAY", "LOCAL_GOVERNMENT"
+    ] | None = Field(None, description="보호 사유")
+
+    @property
+    def type_korean(self) -> str:
+        """보호대상 유형 한국어."""
+        type_map = {
+            "CHILD_FACILITY": "아동 양육시설",
+            "GROUP_HOME": "공동생활가정(그룹홈)",
+        }
+        return type_map.get(self.type or "", "")
+
+    @property
+    def reason_korean(self) -> str:
+        """보호 사유 한국어."""
+        reason_map = {
+            "GUARDIAN_ABSENCE": "보호자 없거나 이탈",
+            "ABUSE": "아동학대",
+            "ILLNESS_RUNAWAY": "보호자 질병 또는 아동 가출",
+            "LOCAL_GOVERNMENT": "지자체장 인정",
+        }
+        return reason_map.get(self.reason or "", "")
 
 
 class BasicInfo(BaseModel):
@@ -49,6 +98,9 @@ class BasicInfo(BaseModel):
     childInfo: ChildInfo = Field(..., description="아동 정보")
     careType: str = Field(..., description="센터 이용 기준")
     priorityReason: str | None = Field(None, description="우선돌봄 세부 사유")
+    protectedChildInfo: ProtectedChildInfo | None = Field(
+        None, description="보호대상 아동 정보 (새 문서 포맷)"
+    )
 
 
 class PsychologicalInfo(BaseModel):
@@ -65,14 +117,201 @@ class RequestMotivation(BaseModel):
     goals: str = Field(..., description="보호자 및 의뢰자의 목표")
 
 
-class KprcSummary(BaseModel):
-    """KPRC 검사소견 (yeirin-ai 생성)."""
+# =============================================================================
+# 검사 유형 상수
+# =============================================================================
+
+ASSESSMENT_TYPES = {
+    "KPRC": "KPRC_CO_SG_E",
+    "CRTES_R": "CRTES_R",
+    "SDQ_A": "SDQ_A",
+}
+
+
+# =============================================================================
+# 검사 소견 모델
+# =============================================================================
+
+
+class BaseAssessmentSummary(BaseModel):
+    """공통 검사소견 필드."""
 
     summaryLines: list[str] | None = Field(None, description="요약 문장 (최대 5줄)")
     expertOpinion: str | None = Field(None, description="전문가 소견")
     keyFindings: list[str] | None = Field(None, description="핵심 발견 사항")
     recommendations: list[str] | None = Field(None, description="권장 사항")
     confidenceScore: float | None = Field(None, ge=0.0, le=1.0, description="신뢰도 점수")
+
+
+class KprcSummary(BaseAssessmentSummary):
+    """KPRC 검사소견 (yeirin-ai 생성)."""
+
+    assessmentType: Literal["KPRC_CO_SG_E"] | None = Field(None, description="검사 유형")
+
+
+class CrtesRSummary(BaseAssessmentSummary):
+    """CRTES-R 검사소견 (아동 외상 반응 척도).
+
+    아동이 경험한 스트레스 상황에 대한 정서적 반응을 측정합니다.
+    """
+
+    assessmentType: Literal["CRTES_R"] = Field("CRTES_R", description="검사 유형")
+    totalScore: int | None = Field(None, ge=0, le=115, description="총점")
+    riskLevel: Literal["normal", "caution", "high_risk"] | None = Field(
+        None, description="위험 수준"
+    )
+    riskLevelDescription: str | None = Field(
+        None, description="위험 수준 설명"
+    )
+
+    @property
+    def risk_level_korean(self) -> str:
+        """위험 수준 한국어 텍스트."""
+        level_map = {
+            "normal": "정상 범위",
+            "caution": "주의 필요",
+            "high_risk": "고위험",
+        }
+        return level_map.get(self.riskLevel or "", "미정")
+
+
+class SdqASummary(BaseAssessmentSummary):
+    """SDQ-A 검사소견 (강점·난점 설문지).
+
+    새 문서 포맷에서는 강점/난점을 분리하여 표시합니다:
+    - 강점 (사회지향 행동): 0-10점, Level 1-3
+    - 난점 (외현화/내현화): 0-40점, Level 1-3
+    """
+
+    assessmentType: Literal["SDQ_A"] = Field("SDQ_A", description="검사 유형")
+
+    # 강점 (사회지향 행동)
+    strengthsScore: int | None = Field(None, ge=0, le=10, description="강점 총점")
+    strengthsLevel: int | None = Field(None, ge=1, le=3, description="강점 수준 (1-3)")
+    strengthsLevelDescription: str | None = Field(
+        None, description="강점 수준 설명 (예: '타인의 감정을 잘 헤아리고...')"
+    )
+
+    # 난점 (외현화 + 내현화)
+    difficultiesScore: int | None = Field(None, ge=0, le=40, description="난점 총점")
+    difficultiesLevel: int | None = Field(None, ge=1, le=3, description="난점 수준 (1-3)")
+    difficultiesLevelDescription: str | None = Field(
+        None, description="난점 수준 설명 (예: '또래관계와 감정, 행동의 조절에...')"
+    )
+
+    # 하위 호환성을 위한 별칭 프로퍼티
+    @property
+    def strengths_level_text(self) -> str:
+        """강점 수준 텍스트."""
+        level_map = {1: "양호", 2: "경계선", 3: "주의 필요"}
+        return level_map.get(self.strengthsLevel or 0, "미정")
+
+    @property
+    def difficulties_level_text(self) -> str:
+        """난점 수준 텍스트."""
+        level_map = {1: "양호", 2: "경계선", 3: "주의 필요"}
+        return level_map.get(self.difficultiesLevel or 0, "미정")
+
+
+# =============================================================================
+# 첨부 검사 결과 모델
+# =============================================================================
+
+
+class AttachedAssessment(BaseModel):
+    """첨부된 개별 검사 결과 정보."""
+
+    assessmentType: str = Field(..., description="검사 유형 (KPRC_CO_SG_E, CRTES_R, SDQ_A)")
+    assessmentName: str = Field(..., description="검사명 (예: KPRC 인성평정척도)")
+    reportS3Key: str | None = Field(None, description="검사 결과 PDF S3 키 (KPRC만 있음, CRTES-R/SDQ-A는 없음)")
+    resultId: str = Field(..., description="검사 결과 ID")
+    totalScore: int | None = Field(None, description="총점")
+    maxScore: int | None = Field(None, description="만점")
+    overallLevel: Literal["normal", "caution", "clinical"] | None = Field(
+        None, description="전반적 수준"
+    )
+    scoredAt: str | None = Field(None, description="채점 일시")
+    summary: BaseAssessmentSummary | None = Field(None, description="AI 생성 요약")
+
+
+# =============================================================================
+# 사회서비스 이용 추천서 (Government Doc) 전용 모델
+# =============================================================================
+
+
+class GuardianInfo(BaseModel):
+    """보호자 정보 (사회서비스 이용 추천서용).
+
+    테이블 1: 대상자 인적사항의 보호자 관련 정보
+    """
+
+    name: str = Field(..., description="보호자 성명")
+    phoneNumber: str = Field(..., description="전화번호 (휴대전화)")
+    homePhone: str | None = Field(None, description="자택 전화번호")
+    address: str = Field(..., description="주소")
+    addressDetail: str | None = Field(None, description="상세 주소")
+    relationToChild: str = Field(..., description="이용자와의 관계 (부모, 담임교사 등)")
+
+
+class InstitutionInfo(BaseModel):
+    """기관/작성자 정보 (사회서비스 이용 추천서용).
+
+    테이블 3: 작성자 정보
+    """
+
+    institutionName: str = Field(..., description="소속기관명")
+    phoneNumber: str = Field(..., description="기관 연락처")
+    address: str = Field(..., description="기관 소재지")
+    addressDetail: str | None = Field(None, description="상세 주소")
+    writerPosition: str = Field(..., description="직 또는 자격 (담임교사, 사회복지사 등)")
+    writerName: str = Field(..., description="작성자 성명")
+    relationToChild: str = Field(..., description="이용자와의 관계")
+
+
+# =============================================================================
+# AI 대화 분석 모델
+# =============================================================================
+
+
+class ConversationAnalysis(BaseModel):
+    """Soul-E AI 대화 분석 결과.
+
+    새 문서 포맷의 '4.2 AI 기반 아동 마음건강 대화 분석 요약' 섹션에서 사용됩니다.
+    """
+
+    # 3줄 요약 (예이린 스타일)
+    summaryLines: list[str] | None = Field(
+        None, description="3줄 요약 (긍정적 특성/관심 영역/기대 성장)"
+    )
+
+    # 전문가 종합 분석 (3-4문장)
+    expertAnalysis: str | None = Field(
+        None, description="전문가 종합 분석 (3-4문장)"
+    )
+
+    # 주요 관찰 사항
+    keyObservations: list[str] | None = Field(
+        None, description="대화에서 발견된 주요 특성 (2-3가지)"
+    )
+
+    # 정서 상태 키워드
+    emotionalKeywords: list[str] | None = Field(
+        None, description="정서 상태 키워드 (예: 불안, 또래갈등)"
+    )
+
+    # 권장 상담 영역
+    recommendedFocusAreas: list[str] | None = Field(
+        None, description="권장 상담 영역 (2-3가지)"
+    )
+
+    # 분석 신뢰도
+    confidenceScore: float | None = Field(
+        None, ge=0.0, le=1.0, description="분석 신뢰도 (0.0 ~ 1.0)"
+    )
+
+    # 대화 세션/메시지 수 (참고용)
+    sessionCount: int | None = Field(None, description="대화 세션 수")
+    messageCount: int | None = Field(None, description="대화 메시지 수")
 
 
 class IntegratedReportRequest(BaseModel):
@@ -91,9 +330,77 @@ class IntegratedReportRequest(BaseModel):
     psychological_info: PsychologicalInfo = Field(..., description="정서심리 정보")
     request_motivation: RequestMotivation = Field(..., description="의뢰 동기")
 
-    # KPRC 검사 데이터 (필수)
-    kprc_summary: KprcSummary = Field(..., description="KPRC 검사소견")
-    assessment_report_s3_key: str = Field(..., description="KPRC PDF S3 key")
+    # 첨부된 검사 결과들 (최대 3개: KPRC, CRTES-R, SDQ-A)
+    attached_assessments: list[AttachedAssessment] | None = Field(
+        None, description="첨부된 검사 결과 목록 (최대 3개)"
+    )
+
+    # ⚠️ 하위 호환성: 기존 필드 유지 (deprecated)
+    # 새 코드에서는 attached_assessments 사용
+    kprc_summary: KprcSummary | None = Field(
+        None, description="[Deprecated] KPRC 검사소견 (attached_assessments 사용 권장)"
+    )
+    assessment_report_s3_key: str | None = Field(
+        None, description="[Deprecated] KPRC PDF S3 key (attached_assessments 사용 권장)"
+    )
+
+    # 사회서비스 이용 추천서 (Government Doc) 데이터 - Optional
+    guardian_info: GuardianInfo | None = Field(
+        None, description="보호자 정보 (사회서비스 이용 추천서용)"
+    )
+    institution_info: InstitutionInfo | None = Field(
+        None, description="기관/작성자 정보 (사회서비스 이용 추천서용)"
+    )
+
+    # Soul-E AI 대화 분석 결과 (새 문서 포맷)
+    conversationAnalysis: ConversationAnalysis | None = Field(
+        None, description="AI 대화 분석 결과 (섹션 4.2)"
+    )
+
+    def get_assessment_pdfs_s3_keys(self) -> list[tuple[str, str]]:
+        """모든 검사 결과 PDF의 S3 키를 반환합니다.
+
+        CRTES-R, SDQ-A는 PDF가 없으므로 제외됩니다.
+
+        Returns:
+            (검사 유형, S3 키) 튜플 리스트
+        """
+        s3_keys: list[tuple[str, str]] = []
+
+        # 새 방식: attached_assessments 사용 (PDF가 있는 것만)
+        if self.attached_assessments:
+            for assessment in self.attached_assessments:
+                if assessment.reportS3Key:
+                    s3_keys.append((assessment.assessmentType, assessment.reportS3Key))
+
+        # 하위 호환: legacy 필드 사용 (attached_assessments가 없는 경우)
+        elif self.assessment_report_s3_key:
+            s3_keys.append(("KPRC_CO_SG_E", self.assessment_report_s3_key))
+
+        return s3_keys
+
+    def get_kprc_summary_for_doc(self) -> KprcSummary | None:
+        """문서 생성용 KPRC 요약을 반환합니다.
+
+        attached_assessments에서 KPRC를 찾거나, legacy 필드를 사용합니다.
+
+        Returns:
+            KPRC 검사소견 또는 None
+        """
+        # 새 방식: attached_assessments에서 KPRC 찾기
+        if self.attached_assessments:
+            for assessment in self.attached_assessments:
+                if assessment.assessmentType == "KPRC_CO_SG_E" and assessment.summary:
+                    return KprcSummary(
+                        summaryLines=assessment.summary.summaryLines,
+                        expertOpinion=assessment.summary.expertOpinion,
+                        keyFindings=assessment.summary.keyFindings,
+                        recommendations=assessment.summary.recommendations,
+                        confidenceScore=assessment.summary.confidenceScore,
+                    )
+
+        # 하위 호환: legacy 필드 사용
+        return self.kprc_summary
 
     class Config:
         """Pydantic 설정."""
@@ -114,6 +421,7 @@ class IntegratedReportRequest(BaseModel):
                         "gender": "MALE",
                         "age": 10,
                         "grade": "초4",
+                        "birthDate": {"year": 2015, "month": 3, "day": 15},
                     },
                     "careType": "PRIORITY",
                     "priorityReason": "BASIC_LIVELIHOOD",
@@ -134,6 +442,23 @@ class IntegratedReportRequest(BaseModel):
                     "confidenceScore": 0.85,
                 },
                 "assessment_report_s3_key": "assessment-reports/KPRC_홍길동_abc123.pdf",
+                "guardian_info": {
+                    "name": "홍부모",
+                    "phoneNumber": "010-1234-5678",
+                    "homePhone": "02-1234-5678",
+                    "address": "서울시 강남구 테헤란로 123",
+                    "addressDetail": "101동 1001호",
+                    "relationToChild": "부",
+                },
+                "institution_info": {
+                    "institutionName": "서울초등학교",
+                    "phoneNumber": "02-123-4567",
+                    "address": "서울시 강남구 학동로 456",
+                    "addressDetail": None,
+                    "writerPosition": "담임교사",
+                    "writerName": "김선생",
+                    "relationToChild": "담임교사",
+                },
             }
         }
 

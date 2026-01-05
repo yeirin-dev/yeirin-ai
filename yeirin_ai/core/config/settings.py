@@ -60,6 +60,9 @@ class Settings(BaseSettings):
     soul_e_webhook_url: str | None = Field(
         default=None, description="Soul-E Webhook 콜백 URL"
     )
+    soul_e_api_url: str = Field(
+        default="http://localhost:8000", description="Soul-E API URL (대화내역 조회)"
+    )
 
     # Yeirin 메인 백엔드 MSA 연동 설정
     yeirin_backend_url: str = Field(
@@ -67,6 +70,11 @@ class Settings(BaseSettings):
     )
     internal_api_secret: str = Field(
         default="yeirin-internal-secret", description="내부 서비스 간 통신용 API 키"
+    )
+
+    # Gotenberg (DOCX → PDF 변환) 설정
+    gotenberg_url: str = Field(
+        default="http://localhost:3001", description="Gotenberg 서버 URL"
     )
 
 
