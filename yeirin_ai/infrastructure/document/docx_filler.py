@@ -1,6 +1,32 @@
 """DOCX 템플릿 채우기.
 
-counsel_request_formatv2.docx 템플릿을 상담의뢰지 데이터로 채웁니다.
+counsel_request_format.docx 템플릿을 상담의뢰지 데이터로 채웁니다.
+
+새 문서 포맷 구조:
+- 테이블 0: 표지 정보 (의뢰일자, 센터명, 담당자)
+- 테이블 1: 섹션 헤더 "1 기본 정보"
+- 테이블 2: 기본 정보 (이름, 성별, 연령, 학년)
+- 테이블 3: 센터 이용 기준 + 보호대상 아동 기준 (Row 0-2: 돌봄, Row 3-4: 보호대상)
+- 테이블 4: 섹션 헤더 "2 정서·심리 관련 정보"
+- 테이블 5: 정서심리 정보 (병력, 특이사항)
+- 테이블 6: 섹션 헤더 "3 의뢰동기 및 상담목표"
+- 테이블 7: 의뢰 정보 (의뢰동기, 목표)
+- 테이블 8: 섹션 헤더 "4 검사 결과 및 AI 기반 종합 소견"
+- 테이블 9: 검사 결과 + AI 소견 (12행 구조)
+  - Row 0: "1. 표준화 검사 결과 요약" 헤더
+  - Row 1: KPRC 헤더
+  - Row 2: KPRC 내용
+  - Row 3: CRTES-R 헤더
+  - Row 4: CRTES-R 내용
+  - Row 5: SDQ-A 헤더
+  - Row 6: SDQ-A 강점/난점 라벨
+  - Row 7: SDQ-A 강점/난점 내용
+  - Row 8: "2. AI 기반 아동 마음건강 대화 분석 요약" 헤더
+  - Row 9: 대화 분석 내용
+  - Row 10: "3. 예이린 AI 기반 통합 전문 소견" 헤더
+  - Row 11: 통합 소견 내용
+- 테이블 10: 섹션 헤더 "5 보호자 동의 여부"
+- 단락: 동의 체크박스
 """
 
 import io
@@ -20,8 +46,8 @@ logger = logging.getLogger(__name__)
 # 나눔고딕 폰트 이름
 NANUM_GOTHIC_FONT = "나눔고딕"
 
-# 템플릿 파일 경로 (v2)
-TEMPLATE_PATH = Path(__file__).parent.parent.parent / "counsel_request_formatv2.docx"
+# 템플릿 파일 경로 (새 포맷)
+TEMPLATE_PATH = Path(__file__).parent.parent.parent / "counsel_request_format.docx"
 
 
 class DocxFillerError(Exception):
@@ -33,19 +59,22 @@ class DocxFillerError(Exception):
 class CounselRequestDocxFiller:
     """상담의뢰지 DOCX 템플릿 채우기.
 
-    counsel_request_formatv2.docx 템플릿의 테이블 구조:
+    counsel_request_format.docx 템플릿의 테이블 구조:
     - 테이블 0: 표지 정보 (의뢰일자, 센터명, 담당자)
     - 테이블 1: 섹션 헤더 "1 기본 정보"
     - 테이블 2: 기본 정보 (이름, 성별, 연령, 학년)
-    - 테이블 3: 센터 이용 기준 (우선돌봄/일반/돌봄특례 + 상세 사유)
+    - 테이블 3: 센터 이용 기준 + 보호대상 아동 기준
+      - Row 0-2: 돌봄 유형 (우선돌봄/일반/돌봄특례)
+      - Row 3: 보호대상 아동 유형 (시설/그룹홈)
+      - Row 4: 보호대상 사유 (보호자 이탈/학대/질병·가출/지자체)
     - 테이블 4: 섹션 헤더 "2 정서·심리 관련 정보"
     - 테이블 5: 정서심리 정보 (병력, 특이사항)
     - 테이블 6: 섹션 헤더 "3 의뢰동기 및 상담목표"
     - 테이블 7: 의뢰 정보 (의뢰동기, 목표)
-    - 테이블 8: 섹션 헤더 "4 KPRC 검사결과"
-    - 테이블 9: AI 종합소견
+    - 테이블 8: 섹션 헤더 "4 검사 결과 및 AI 기반 종합 소견"
+    - 테이블 9: 검사 결과 + AI 소견 (12행 구조)
     - 테이블 10: 섹션 헤더 "5 보호자 동의 여부"
-    - 단락 18: 동의 체크박스
+    - 단락: 동의 체크박스
     """
 
     def __init__(self, template_path: Path | None = None) -> None:
@@ -83,8 +112,9 @@ class CounselRequestDocxFiller:
             # 테이블 2: 기본 정보 (이름, 성별, 연령, 학년)
             self._fill_basic_info_table(doc.tables[2], request)
 
-            # 테이블 3: 센터 이용 기준 (체크박스)
+            # 테이블 3: 센터 이용 기준 (Row 0-2) + 보호대상 아동 기준 (Row 3-4)
             self._fill_care_type_table(doc.tables[3], request)
+            self._fill_protected_child_section(doc.tables[3], request)
 
             # 테이블 5: 정서심리 정보 (병력, 특이사항)
             self._fill_psychological_info_table(doc.tables[5], request)
@@ -92,8 +122,8 @@ class CounselRequestDocxFiller:
             # 테이블 7: 의뢰 정보 (의뢰동기, 목표)
             self._fill_motivation_table(doc.tables[7], request)
 
-            # 테이블 9: AI 종합소견
-            self._fill_ai_summary_table(doc.tables[9], request)
+            # 테이블 9: 검사 결과 및 AI 소견 (새 12행 구조)
+            self._fill_assessment_results_table(doc.tables[9], request)
 
             # 동의 체크박스 처리 (단락에서)
             self._fill_consent(doc)
@@ -265,6 +295,72 @@ class CounselRequestDocxFiller:
             extra={"priority_reason": priority_reason, "target_text": target_text},
         )
 
+    # 보호대상 아동 유형 → 한국어 텍스트 매핑
+    PROTECTED_CHILD_TYPE_TEXT_MAP: dict[str, str] = {
+        "CHILD_FACILITY": "아동 양육시설",
+        "GROUP_HOME": "공동생활가정(그룹홈)",
+    }
+
+    # 보호대상 아동 사유 → 한국어 텍스트 매핑
+    PROTECTED_CHILD_REASON_TEXT_MAP: dict[str, str] = {
+        "GUARDIAN_ABSENCE": "보호자가 없거나 보호자로부터 이탈",
+        "ABUSE": "아동을 학대하는 경우",
+        "ILLNESS_RUNAWAY": "보호자의 질병, 가출 등",
+        "LOCAL_GOVERNMENT": "지방자치단체장이 보호가 필요하다고 인정한 자",
+    }
+
+    def _fill_protected_child_section(
+        self, table, request: IntegratedReportRequest
+    ) -> None:
+        """테이블 3 Row 3-4: 보호대상 아동 기준 체크박스를 처리합니다.
+
+        테이블 구조 (새 포맷):
+        - Row 3: 보호대상아동 기준 | □ 아동 양육시설 | □ 공동생활가정(그룹홈)
+        - Row 4: 보호대상아동 사유 | □ 보호자 이탈... | □ 학대... | □ 질병... | □ 지자체...
+        """
+        protected_info = request.basic_info.protectedChildInfo
+        if not protected_info:
+            return
+
+        # Row 3: 보호대상 아동 유형 (CHILD_FACILITY / GROUP_HOME)
+        if protected_info.type and len(table.rows) > 3:
+            row3 = table.rows[3]
+            target_text = self.PROTECTED_CHILD_TYPE_TEXT_MAP.get(protected_info.type)
+            if target_text:
+                for cell_idx in range(1, len(row3.cells)):
+                    cell = row3.cells[cell_idx]
+                    if target_text in cell.text:
+                        cell.text = cell.text.replace("□", "☑")
+                        logger.debug(
+                            "보호대상 아동 유형 체크",
+                            extra={"type": protected_info.type, "text": target_text},
+                        )
+                        break
+
+        # Row 4: 보호대상 아동 사유
+        if protected_info.reason and len(table.rows) > 4:
+            row4 = table.rows[4]
+            target_text = self.PROTECTED_CHILD_REASON_TEXT_MAP.get(protected_info.reason)
+            if target_text:
+                for cell_idx in range(1, len(row4.cells)):
+                    cell = row4.cells[cell_idx]
+                    cell_text = cell.text
+                    # 셀 내 줄바꿈이 있을 수 있으므로 부분 매칭
+                    if target_text[:10] in cell_text:
+                        lines = cell_text.split("\n")
+                        new_lines = []
+                        for line in lines:
+                            if target_text[:10] in line:
+                                new_lines.append(line.replace("□", "☑"))
+                            else:
+                                new_lines.append(line)
+                        cell.text = "\n".join(new_lines)
+                        logger.debug(
+                            "보호대상 아동 사유 체크",
+                            extra={"reason": protected_info.reason, "text": target_text},
+                        )
+                        break
+
     def _fill_psychological_info_table(
         self, table, request: IntegratedReportRequest
     ) -> None:
@@ -311,98 +407,215 @@ class CounselRequestDocxFiller:
                 table.rows[1].cells[1], motivation.goals, font_size=10
             )
 
-    def _fill_ai_summary_table(
+    def _fill_assessment_results_table(
         self, table, request: IntegratedReportRequest
     ) -> None:
-        """테이블 9: AI 종합소견을 채웁니다.
+        """테이블 9: 검사 결과 및 AI 기반 종합 소견을 채웁니다.
 
-        테이블 구조:
-        - Row 0: 예이린 AI 종합소견 (헤더)
-        - Row 1: (내용)
-
-        Note: 다중 검사 지원 - KPRC 외에 CRTES-R, SDQ-A 검사 결과가 있으면
-        각 검사별 요약을 추가합니다.
+        새 문서 포맷 테이블 구조 (12행):
+        - Row 0: "1. 표준화 검사 결과 요약" 헤더
+        - Row 1: "1) KPRC" 헤더
+        - Row 2: KPRC 내용 (3줄 소견)
+        - Row 3: "2) CRTES-R" 헤더
+        - Row 4: CRTES-R 내용 (3줄 소견)
+        - Row 5: "3) SDQ-A" 헤더
+        - Row 6: ["강점(사회지향 행동 관련)", "난점(외현화, 내현화)"] 라벨
+        - Row 7: SDQ-A 내용 (2셀: 강점 3줄 / 난점 3줄)
+        - Row 8: "2. AI 기반 아동 마음건강 대화 분석 요약" 헤더
+        - Row 9: Soul-E 대화 분석 내용
+        - Row 10: "3. 예이린 AI 기반 통합 전문 소견" 헤더
+        - Row 11: 통합 AI 소견 내용
         """
-        # Row 1, Col 0: AI 종합소견 내용
-        if len(table.rows) <= 1:
+        if len(table.rows) < 12:
+            logger.warning("테이블 9 행 수 부족", extra={"row_count": len(table.rows)})
             return
 
-        cell = table.rows[1].cells[0]
-        content_parts: list[str] = []
+        # 1) KPRC 소견 (Row 2)
+        self._fill_kprc_section(table, request)
 
-        # KPRC 소견 (하위 호환 API 사용)
+        # 2) CRTES-R 소견 (Row 4)
+        self._fill_crtes_r_section(table, request)
+
+        # 3) SDQ-A 소견 (Row 7: 강점/난점 분리)
+        self._fill_sdq_a_section(table, request)
+
+        # 4) Soul-E 대화 분석 (Row 9)
+        self._fill_conversation_analysis_section(table, request)
+
+        # 5) 통합 AI 소견 (Row 11)
+        self._fill_integrated_opinion_section(table, request)
+
+    def _fill_kprc_section(self, table, request: IntegratedReportRequest) -> None:
+        """Row 2: KPRC 검사 소견을 채웁니다."""
+        if len(table.rows) <= 2:
+            return
+
+        cell = table.rows[2].cells[0]
         kprc = request.get_kprc_summary_for_doc()
-        if kprc:
-            content_parts.append("[KPRC 검사 소견]")
 
-            # 전문가 소견
-            if kprc.expertOpinion:
-                content_parts.append(kprc.expertOpinion)
+        if kprc and kprc.summaryLines:
+            # 3줄 요약만 표시 (새 포맷)
+            content = "\n".join(f"• {line}" for line in kprc.summaryLines[:3])
+            self._set_cell_text_with_font(cell, content, font_size=10)
+        else:
+            self._set_cell_text_with_font(cell, "검사 결과가 없습니다.", font_size=10)
 
-            # 요약
-            if kprc.summaryLines:
-                content_parts.append("\n[요약]")
-                for line in kprc.summaryLines:
-                    content_parts.append(f"• {line}")
-
-            # 핵심 발견사항
-            if kprc.keyFindings:
-                content_parts.append("\n[핵심 발견사항]")
-                for finding in kprc.keyFindings:
-                    content_parts.append(f"• {finding}")
-
-            # 권장사항
-            if kprc.recommendations:
-                content_parts.append("\n[권장사항]")
-                for rec in kprc.recommendations:
-                    content_parts.append(f"• {rec}")
-
-        # 추가 검사 소견 (CRTES-R, SDQ-A)
-        if request.attached_assessments:
-            for assessment in request.attached_assessments:
-                if assessment.assessmentType == "KPRC_CO_SG_E":
-                    continue  # KPRC는 이미 처리됨
-
-                if assessment.summary:
-                    summary = assessment.summary
-
-                    # 검사명으로 섹션 헤더 추가
-                    if content_parts:
-                        content_parts.append("\n\n")
-                    content_parts.append(f"[{assessment.assessmentName} 검사 소견]")
-
-                    # 전문가 소견
-                    if summary.expertOpinion:
-                        content_parts.append(summary.expertOpinion)
-
-                    # 요약
-                    if summary.summaryLines:
-                        content_parts.append("\n[요약]")
-                        for line in summary.summaryLines:
-                            content_parts.append(f"• {line}")
-
-                    # 핵심 발견사항
-                    if summary.keyFindings:
-                        content_parts.append("\n[핵심 발견사항]")
-                        for finding in summary.keyFindings:
-                            content_parts.append(f"• {finding}")
-
-                    # 권장사항
-                    if summary.recommendations:
-                        content_parts.append("\n[권장사항]")
-                        for rec in summary.recommendations:
-                            content_parts.append(f"• {rec}")
-
-        # 내용이 없으면 기본 메시지
-        if not content_parts:
-            content_parts.append("검사 소견이 없습니다.")
-
-        # 나눔고딕 폰트로 셀 채우기
-        self._set_cell_text_with_font(cell, "\n".join(content_parts), font_size=10)
-
-        # 셀 스타일 설정 (정렬)
         for para in cell.paragraphs:
             para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+    def _fill_crtes_r_section(self, table, request: IntegratedReportRequest) -> None:
+        """Row 4: CRTES-R 검사 소견을 채웁니다."""
+        if len(table.rows) <= 4:
+            return
+
+        cell = table.rows[4].cells[0]
+        crtes_r = self._get_assessment_summary(request, "CRTES_R")
+
+        if crtes_r and crtes_r.summaryLines:
+            content = "\n".join(f"• {line}" for line in crtes_r.summaryLines[:3])
+            self._set_cell_text_with_font(cell, content, font_size=10)
+        else:
+            self._set_cell_text_with_font(cell, "검사 결과가 없습니다.", font_size=10)
+
+        for para in cell.paragraphs:
+            para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+    def _fill_sdq_a_section(self, table, request: IntegratedReportRequest) -> None:
+        """Row 7: SDQ-A 검사 소견을 채웁니다 (강점/난점 분리).
+
+        SDQ-A는 2개 셀로 분리:
+        - Cell 0: 강점 (사회지향 행동 관련) - 3줄
+        - Cell 1: 난점 (외현화, 내현화) - 3줄
+        """
+        if len(table.rows) <= 7:
+            return
+
+        row = table.rows[7]
+        sdq_a = self._get_assessment_summary(request, "SDQ_A")
+
+        # SDQ-A 요약은 6줄: 앞 3줄은 강점, 뒤 3줄은 난점
+        if sdq_a and sdq_a.summaryLines and len(sdq_a.summaryLines) >= 6:
+            # 강점 (첫 3줄)
+            if len(row.cells) > 0:
+                strengths_content = "\n".join(
+                    f"• {line}" for line in sdq_a.summaryLines[:3]
+                )
+                self._set_cell_text_with_font(row.cells[0], strengths_content, font_size=10)
+                for para in row.cells[0].paragraphs:
+                    para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+            # 난점 (뒤 3줄)
+            if len(row.cells) > 1:
+                difficulties_content = "\n".join(
+                    f"• {line}" for line in sdq_a.summaryLines[3:6]
+                )
+                self._set_cell_text_with_font(row.cells[1], difficulties_content, font_size=10)
+                for para in row.cells[1].paragraphs:
+                    para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        else:
+            # 검사 결과 없음
+            if len(row.cells) > 0:
+                self._set_cell_text_with_font(row.cells[0], "검사 결과가 없습니다.", font_size=10)
+            if len(row.cells) > 1:
+                self._set_cell_text_with_font(row.cells[1], "검사 결과가 없습니다.", font_size=10)
+
+    def _fill_conversation_analysis_section(
+        self, table, request: IntegratedReportRequest
+    ) -> None:
+        """Row 9: Soul-E AI 대화 분석 요약을 채웁니다."""
+        if len(table.rows) <= 9:
+            return
+
+        cell = table.rows[9].cells[0]
+
+        # conversationAnalysis 필드가 있으면 사용
+        if hasattr(request, "conversationAnalysis") and request.conversationAnalysis:
+            analysis = request.conversationAnalysis
+            content_parts: list[str] = []
+
+            # 3줄 요약
+            if hasattr(analysis, "summaryLines") and analysis.summaryLines:
+                for line in analysis.summaryLines[:3]:
+                    content_parts.append(f"• {line}")
+
+            # 전문가 분석 (선택)
+            if hasattr(analysis, "expertAnalysis") and analysis.expertAnalysis:
+                if content_parts:
+                    content_parts.append("")
+                content_parts.append(analysis.expertAnalysis)
+
+            if content_parts:
+                self._set_cell_text_with_font(cell, "\n".join(content_parts), font_size=10)
+            else:
+                self._set_cell_text_with_font(cell, "대화 분석 결과가 없습니다.", font_size=10)
+        else:
+            self._set_cell_text_with_font(cell, "AI 상담사와의 대화 기록이 없습니다.", font_size=10)
+
+        for para in cell.paragraphs:
+            para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+    def _fill_integrated_opinion_section(
+        self, table, request: IntegratedReportRequest
+    ) -> None:
+        """Row 11: 예이린 AI 기반 통합 전문 소견을 채웁니다."""
+        if len(table.rows) <= 11:
+            return
+
+        cell = table.rows[11].cells[0]
+        content_parts: list[str] = []
+
+        # 모든 검사의 전문가 소견 통합
+        # KPRC
+        kprc = request.get_kprc_summary_for_doc()
+        if kprc and kprc.expertOpinion:
+            content_parts.append(kprc.expertOpinion)
+
+        # CRTES-R
+        crtes_r = self._get_assessment_summary(request, "CRTES_R")
+        if crtes_r and crtes_r.expertOpinion:
+            if content_parts:
+                content_parts.append("")
+            content_parts.append(crtes_r.expertOpinion)
+
+        # SDQ-A
+        sdq_a = self._get_assessment_summary(request, "SDQ_A")
+        if sdq_a and sdq_a.expertOpinion:
+            if content_parts:
+                content_parts.append("")
+            content_parts.append(sdq_a.expertOpinion)
+
+        # 대화 분석 전문가 의견 추가
+        if hasattr(request, "conversationAnalysis") and request.conversationAnalysis:
+            analysis = request.conversationAnalysis
+            if hasattr(analysis, "expertAnalysis") and analysis.expertAnalysis:
+                if content_parts:
+                    content_parts.append("")
+                content_parts.append(analysis.expertAnalysis)
+
+        if content_parts:
+            self._set_cell_text_with_font(cell, "\n\n".join(content_parts), font_size=10)
+        else:
+            # 기본 메시지
+            default_text = (
+                f"{request.child_name} 아동에 대한 종합적인 심리 평가 결과, "
+                "전문 상담 서비스를 통한 정서적 지원이 권장됩니다."
+            )
+            self._set_cell_text_with_font(cell, default_text, font_size=10)
+
+        for para in cell.paragraphs:
+            para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+    def _get_assessment_summary(self, request: IntegratedReportRequest, assessment_type: str):
+        """특정 타입의 검사 요약을 가져옵니다."""
+        if not request.attached_assessments:
+            return None
+
+        for assessment in request.attached_assessments:
+            # CRTES_R 또는 SDQ_A 매칭
+            if assessment_type in (assessment.assessmentType or ""):
+                return assessment.summary
+
+        return None
 
     def _fill_consent(self, doc: Document) -> None:
         """동의 체크박스를 처리합니다.
