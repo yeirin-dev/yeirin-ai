@@ -103,6 +103,7 @@ jobs:
             echo "INTERNAL_API_SECRET=$(aws ssm get-parameter --name '/yeirin/dev/common/internal-api-secret' --with-decryption --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
             echo "YEIRIN_BACKEND_URL=$(aws ssm get-parameter --name '/yeirin/dev/yeirin-ai/yeirin-backend-url' --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
             echo "SOUL_E_WEBHOOK_URL=$(aws ssm get-parameter --name '/yeirin/dev/yeirin-ai/soul-e-webhook-url' --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
+            echo "SOUL_E_API_URL=$(aws ssm get-parameter --name '/yeirin/dev/yeirin-ai/soul-e-api-url' --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
             echo "CORS_ORIGINS=$(aws ssm get-parameter --name '/yeirin/dev/yeirin-ai/cors-origins' --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
 
             echo "Environment file created."
