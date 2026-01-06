@@ -529,6 +529,402 @@ CRTES-R (아동 외상 반응 척도) 검사 결과를 바탕으로
         )
 
     # =========================================================================
+    # 간소화된 요약 생성 (totalScore, maxScore, overallLevel만 사용)
+    # =========================================================================
+
+    async def generate_sdq_a_summary_simple(
+        self,
+        total_score: int | None,
+        max_score: int | None,
+        overall_level: str | None,
+        child_context: ChildContext,
+    ) -> AssessmentOpinion:
+        """간소화된 SDQ-A 요약을 생성합니다.
+
+        상세 점수(강점/난점 분리)가 없는 경우 전체 점수와 수준만으로 요약을 생성합니다.
+
+        Args:
+            total_score: 총점 (0-50 범위)
+            max_score: 최대 점수 (기본 50)
+            overall_level: 전체 수준 ('normal', 'caution', 'clinical' 등)
+            child_context: 아동 컨텍스트 정보
+
+        Returns:
+            AssessmentOpinion 객체
+        """
+        logger.info(
+            "SDQ-A 간소화 요약 생성 시작",
+            extra={
+                "child_name": child_context.name,
+                "total_score": total_score,
+                "overall_level": overall_level,
+            },
+        )
+
+        # 유효한 점수가 없으면 기본 요약 반환
+        if total_score is None:
+            return self._create_default_sdq_a_simple_opinion(child_context)
+
+        prompt = self._build_sdq_a_simple_prompt(total_score, max_score, overall_level, child_context)
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": self._get_sdq_a_simple_system_prompt(),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                response_format={"type": "json_object"},
+            )
+
+            content = response.choices[0].message.content
+            if not content:
+                raise ValueError("OpenAI 응답이 비어있습니다")
+
+            result = json.loads(content)
+            opinion = self._parse_opinion(result)
+
+            logger.info(
+                "SDQ-A 간소화 요약 생성 완료",
+                extra={
+                    "child_name": child_context.name,
+                    "confidence": opinion.confidence_score,
+                },
+            )
+            return opinion
+
+        except Exception as e:
+            logger.error(
+                "SDQ-A 간소화 요약 생성 실패",
+                extra={"child_name": child_context.name, "error": str(e)},
+            )
+            return self._create_default_sdq_a_simple_opinion(child_context, total_score, max_score, overall_level)
+
+    def _get_sdq_a_simple_system_prompt(self) -> str:
+        """SDQ-A 간소화 요약용 시스템 프롬프트."""
+        return """당신은 '예이린(Yeirin)' AI 심리상담 플랫폼의 아동 심리 전문가입니다.
+
+SDQ-A (강점·난점 설문지) 검사의 전체 점수와 수준 정보를 바탕으로
+부모님께 전달할 따뜻하고 이해하기 쉬운 요약을 작성합니다.
+
+## SDQ-A 검사 개요:
+- 강점(친사회적 행동)과 난점(정서/행동 어려움)을 종합 평가
+- 전체 점수가 높을수록 난점이 많음을 의미
+
+## 예이린 요약 원칙:
+
+1. **강점 우선**: 아이의 긍정적인 면을 먼저 언급
+2. **균형 잡힌 해석**: 난점도 성장 기회로 긍정적으로 표현
+3. **구체적 조언**: 부모님이 실천 가능한 지원 방법 제시
+4. **따뜻한 어조**: 전문적이되 친근하고 희망적인 표현
+5. **진단 금지**: 장애명이나 진단명 절대 사용 금지"""
+
+    def _build_sdq_a_simple_prompt(
+        self,
+        total_score: int,
+        max_score: int | None,
+        overall_level: str | None,
+        child_context: ChildContext,
+    ) -> str:
+        """SDQ-A 간소화 요약 프롬프트 생성."""
+        child_parts = [f"이름: {child_context.name}"]
+        if child_context.age:
+            child_parts.append(f"나이: {child_context.age}세")
+        if child_context.gender:
+            child_parts.append(f"성별: {child_context.get_gender_korean()}")
+        child_desc = " | ".join(child_parts)
+
+        # 수준 해석
+        level_desc = self._interpret_sdq_a_overall_level(overall_level, total_score, max_score or 50)
+
+        return f"""## 아동 정보:
+{child_desc}
+
+## SDQ-A 검사 결과 (요약):
+
+- 총점: {total_score}점 (만점 {max_score or 50}점)
+- 전체 수준: {level_desc}
+
+## 요청사항:
+
+위 검사 결과를 바탕으로 다음을 작성해주세요:
+
+1. **요약 3줄**:
+   - 1줄: 아이의 강점과 잠재력
+   - 2줄: 관심이 필요한 영역 (성장 기회로 표현)
+   - 3줄: 부모님께 드리는 따뜻한 조언
+
+2. 전문가 종합 소견 (2-3문장)
+3. 핵심 발견 사항 2개
+4. 가정에서 실천할 수 있는 권장 사항 2개
+
+응답은 반드시 다음 JSON 형식으로:
+{{
+  "summary_lines": ["1줄", "2줄", "3줄"],
+  "expert_opinion": "종합 소견",
+  "key_findings": ["발견 1", "발견 2"],
+  "recommendations": ["권장 1", "권장 2"],
+  "confidence_score": 0.75
+}}""".strip()
+
+    def _interpret_sdq_a_overall_level(
+        self, overall_level: str | None, total_score: int, max_score: int
+    ) -> str:
+        """SDQ-A 전체 수준 해석."""
+        if overall_level == "normal":
+            return "양호 - 정서와 행동이 안정적인 상태입니다."
+        if overall_level == "caution":
+            return "경계선 - 일부 영역에서 관심과 지지가 필요합니다."
+        if overall_level == "clinical":
+            return "주의 필요 - 전문적인 관심과 지원이 권장됩니다."
+
+        # overall_level이 없거나 비표준일 경우 점수 기반 해석
+        ratio = total_score / max_score if max_score > 0 else 0
+        if ratio < 0.3:
+            return "양호 - 전반적으로 안정적인 상태로 보입니다."
+        if ratio < 0.6:
+            return "보통 - 일부 영역에서 관심이 도움될 수 있습니다."
+        return "관심 필요 - 정서적 지지와 관심이 권장됩니다."
+
+    def _create_default_sdq_a_simple_opinion(
+        self,
+        child_context: ChildContext,
+        total_score: int | None = None,
+        max_score: int | None = None,
+        overall_level: str | None = None,
+    ) -> AssessmentOpinion:
+        """SDQ-A 간소화 기본 요약 생성."""
+        name = child_context.name
+
+        score_info = ""
+        if total_score is not None:
+            score_info = f" (총점 {total_score}점)"
+
+        return AssessmentOpinion(
+            summary_lines=[
+                f"{name} 아동은 SDQ-A 검사{score_info}를 통해 정서·행동 상태가 평가되었습니다.",
+                "아동의 강점을 바탕으로 관심이 필요한 영역을 지원하면 도움이 됩니다.",
+                "따뜻한 관심과 격려가 아이의 건강한 성장에 큰 힘이 됩니다.",
+            ],
+            expert_opinion=(
+                f"{name} 아동의 SDQ-A 검사 결과, 정서와 행동 영역에서 "
+                "전반적인 상태가 평가되었습니다. 아동의 강점을 인정하고 "
+                "관심이 필요한 부분을 지지하는 양육이 권장됩니다."
+            ),
+            key_findings=[
+                "SDQ-A 검사를 통한 정서·행동 평가 완료",
+                "개별 영역별 세부 지원 방향 수립 필요",
+            ],
+            recommendations=[
+                "아이의 긍정적 행동에 대해 구체적으로 칭찬하기",
+                "감정 표현을 돕는 대화 시간 갖기",
+            ],
+            confidence_score=0.5,
+        )
+
+    async def generate_crtes_r_summary_simple(
+        self,
+        total_score: int | None,
+        max_score: int | None,
+        overall_level: str | None,
+        child_context: ChildContext,
+    ) -> AssessmentOpinion:
+        """간소화된 CRTES-R 요약을 생성합니다.
+
+        상세 점수가 없는 경우 전체 점수와 수준만으로 요약을 생성합니다.
+
+        Args:
+            total_score: 총점
+            max_score: 최대 점수
+            overall_level: 전체 수준 ('normal', 'caution', 'clinical' 등)
+            child_context: 아동 컨텍스트 정보
+
+        Returns:
+            AssessmentOpinion 객체
+        """
+        logger.info(
+            "CRTES-R 간소화 요약 생성 시작",
+            extra={
+                "child_name": child_context.name,
+                "total_score": total_score,
+                "overall_level": overall_level,
+            },
+        )
+
+        # 유효한 점수가 없으면 기본 요약 반환
+        if total_score is None:
+            return self._create_default_crtes_r_simple_opinion(child_context)
+
+        prompt = self._build_crtes_r_simple_prompt(total_score, max_score, overall_level, child_context)
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": self._get_crtes_r_simple_system_prompt(),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                response_format={"type": "json_object"},
+            )
+
+            content = response.choices[0].message.content
+            if not content:
+                raise ValueError("OpenAI 응답이 비어있습니다")
+
+            result = json.loads(content)
+            opinion = self._parse_opinion(result)
+
+            logger.info(
+                "CRTES-R 간소화 요약 생성 완료",
+                extra={
+                    "child_name": child_context.name,
+                    "confidence": opinion.confidence_score,
+                },
+            )
+            return opinion
+
+        except Exception as e:
+            logger.error(
+                "CRTES-R 간소화 요약 생성 실패",
+                extra={"child_name": child_context.name, "error": str(e)},
+            )
+            return self._create_default_crtes_r_simple_opinion(child_context, total_score, max_score, overall_level)
+
+    def _get_crtes_r_simple_system_prompt(self) -> str:
+        """CRTES-R 간소화 요약용 시스템 프롬프트."""
+        return """당신은 '예이린(Yeirin)' AI 심리상담 플랫폼의 아동 심리 전문가입니다.
+
+CRTES-R (아동 외상 반응 척도) 검사의 전체 점수와 수준 정보를 바탕으로
+부모님께 전달할 따뜻하고 이해하기 쉬운 요약을 작성합니다.
+
+## CRTES-R 검사 개요:
+- 아동이 경험한 스트레스 상황에 대한 정서적 반응을 측정
+- 점수가 높을수록 스트레스 반응이 큼
+
+## 예이린 요약 원칙:
+
+1. **민감한 접근**: 외상 관련 검사이므로 매우 조심스럽게 표현
+2. **회복 중심**: 현재 상태보다 회복 가능성에 초점
+3. **지지적 어조**: 아이와 보호자 모두를 지지하는 표현
+4. **전문 연계**: 필요시 전문 상담 연계 권고
+5. **진단 금지**: PTSD 등 진단명 절대 사용 금지"""
+
+    def _build_crtes_r_simple_prompt(
+        self,
+        total_score: int,
+        max_score: int | None,
+        overall_level: str | None,
+        child_context: ChildContext,
+    ) -> str:
+        """CRTES-R 간소화 요약 프롬프트 생성."""
+        child_parts = [f"이름: {child_context.name}"]
+        if child_context.age:
+            child_parts.append(f"나이: {child_context.age}세")
+        if child_context.gender:
+            child_parts.append(f"성별: {child_context.get_gender_korean()}")
+        child_desc = " | ".join(child_parts)
+
+        # 수준 해석
+        level_desc = self._interpret_crtes_r_overall_level(overall_level, total_score, max_score or 115)
+
+        return f"""## 아동 정보:
+{child_desc}
+
+## CRTES-R 검사 결과 (요약):
+
+- 총점: {total_score}점 (만점 {max_score or 115}점)
+- 전체 수준: {level_desc}
+
+## 요청사항:
+
+위 검사 결과를 바탕으로 다음을 작성해주세요:
+
+1. **요약 3줄**:
+   - 1줄: 아이의 현재 상태에 대한 이해와 강점
+   - 2줄: 관심이 필요한 영역 (회복 관점으로 표현)
+   - 3줄: 부모님께 드리는 지지와 조언
+
+2. 전문가 종합 소견 (2-3문장)
+3. 핵심 발견 사항 2개
+4. 가정에서 실천할 수 있는 권장 사항 2개
+
+⚠️ 중요: PTSD, 외상후 스트레스 장애 등 진단명을 사용하지 마세요.
+
+응답은 반드시 다음 JSON 형식으로:
+{{
+  "summary_lines": ["1줄", "2줄", "3줄"],
+  "expert_opinion": "종합 소견",
+  "key_findings": ["발견 1", "발견 2"],
+  "recommendations": ["권장 1", "권장 2"],
+  "confidence_score": 0.75
+}}""".strip()
+
+    def _interpret_crtes_r_overall_level(
+        self, overall_level: str | None, total_score: int, max_score: int
+    ) -> str:
+        """CRTES-R 전체 수준 해석."""
+        if overall_level == "normal":
+            return "정상 범위 - 스트레스 반응이 안정적입니다."
+        if overall_level == "caution":
+            return "주의 필요 - 일부 스트레스 반응이 관찰되어 관심이 필요합니다."
+        if overall_level == "clinical":
+            return "고위험 - 전문적인 지원과 상담이 권장됩니다."
+
+        # overall_level이 없거나 비표준일 경우 점수 기반 해석
+        ratio = total_score / max_score if max_score > 0 else 0
+        if ratio < 0.3:
+            return "정상 범위 - 스트레스 반응이 안정적으로 보입니다."
+        if ratio < 0.6:
+            return "주의 필요 - 일부 영역에서 정서적 지지가 도움될 수 있습니다."
+        return "관심 필요 - 전문적인 관심과 지원이 권장됩니다."
+
+    def _create_default_crtes_r_simple_opinion(
+        self,
+        child_context: ChildContext,
+        total_score: int | None = None,
+        max_score: int | None = None,
+        overall_level: str | None = None,
+    ) -> AssessmentOpinion:
+        """CRTES-R 간소화 기본 요약 생성."""
+        name = child_context.name
+
+        score_info = ""
+        if total_score is not None:
+            score_info = f" (총점 {total_score}점)"
+
+        return AssessmentOpinion(
+            summary_lines=[
+                f"{name} 아동은 스트레스 상황에서 회복할 수 있는 내적 힘을 가지고 있습니다.",
+                "현재 정서적 안정을 위한 지지와 관심이 도움이 될 수 있습니다.",
+                "안정적인 환경과 따뜻한 관계가 아이의 회복에 큰 힘이 됩니다.",
+            ],
+            expert_opinion=(
+                f"{name} 아동의 CRTES-R 검사 결과{score_info}, "
+                "스트레스 반응 수준이 평가되었습니다. "
+                "아동의 정서적 안정과 회복을 위해 따뜻한 지지가 도움이 됩니다."
+            ),
+            key_findings=[
+                "CRTES-R 검사를 통한 스트레스 반응 평가 완료",
+                "안정적인 지지 환경 조성이 중요",
+            ],
+            recommendations=[
+                "아이가 안전하다고 느끼는 일상 루틴 유지하기",
+                "아이의 감정 표현을 있는 그대로 수용하기",
+            ],
+            confidence_score=0.5,
+        )
+
+    # =========================================================================
     # 공통 유틸리티
     # =========================================================================
 

@@ -12,11 +12,18 @@ import httpx
 
 from yeirin_ai.core.config.settings import settings
 from yeirin_ai.domain.integrated_report.models import (
+    BaseAssessmentSummary,
     IntegratedReportRequest,
     IntegratedReportResult,
 )
 from yeirin_ai.infrastructure.document import CounselRequestDocxFiller, DocxToPdfConverter
 from yeirin_ai.infrastructure.document.government_docx_filler import GovernmentDocxFiller
+from yeirin_ai.infrastructure.llm.assessment_opinion_generator import (
+    AssessmentOpinionGenerator,
+)
+from yeirin_ai.infrastructure.llm.assessment_opinion_generator import (
+    ChildContext as AssessmentChildContext,
+)
 from yeirin_ai.infrastructure.llm.recommender_opinion_generator import (
     ChildContext,
     RecommenderOpinion,
@@ -68,6 +75,7 @@ class IntegratedReportService:
         self.pdf_converter = DocxToPdfConverter()
         self.pdf_merger = PDFMerger()
         self.recommender_opinion_generator = RecommenderOpinionGenerator()
+        self.assessment_opinion_generator = AssessmentOpinionGenerator()
 
     async def process(self, request: IntegratedReportRequest) -> IntegratedReportResult:
         """통합 보고서를 생성합니다.
@@ -171,6 +179,9 @@ class IntegratedReportService:
                     "[INTEGRATED_REPORT] Step 1 건너뜀: 사회서비스 이용 추천서 데이터 없음",
                     extra={"has_guardian_info": False, "has_institution_info": False},
                 )
+
+            # 1.5. SDQ-A/CRTES-R 요약 자동 생성 (summary가 없는 경우)
+            await self._generate_missing_assessment_summaries(request)
 
             # 2. 상담의뢰지 DOCX 템플릿 채우기
             step2_start = time.time()
@@ -553,6 +564,123 @@ class IntegratedReportService:
                 extra={"error": str(e)},
             )
             raise IntegratedReportServiceError(f"S3 업로드 실패: {e}") from e
+
+    async def _generate_missing_assessment_summaries(
+        self, request: IntegratedReportRequest
+    ) -> None:
+        """SDQ-A/CRTES-R 검사 결과의 누락된 요약을 자동 생성합니다.
+
+        summary가 없는 SDQ-A/CRTES-R 검사에 대해 LLM을 사용하여
+        간소화된 요약(totalScore, maxScore, overallLevel 기반)을 생성합니다.
+
+        Args:
+            request: 통합 보고서 생성 요청 (in-place 수정됨)
+        """
+        if not request.attached_assessments:
+            return
+
+        # 아동 컨텍스트 구성 (AssessmentOpinionGenerator용 - goals 없음)
+        assessment_child_context = AssessmentChildContext(
+            name=request.child_name,
+            age=request.basic_info.childInfo.age if request.basic_info else None,
+            gender=request.basic_info.childInfo.gender if request.basic_info else None,
+        )
+
+        for assessment in request.attached_assessments:
+            # summary가 이미 있으면 건너뜀
+            if assessment.summary is not None:
+                continue
+
+            assessment_type = assessment.assessmentType
+            generated_summary: BaseAssessmentSummary | None = None
+
+            # SDQ-A 검사 요약 생성
+            if assessment_type == "SDQ_A":
+                logger.info(
+                    "[INTEGRATED_REPORT] SDQ-A 요약 자동 생성 시작",
+                    extra={
+                        "totalScore": assessment.totalScore,
+                        "maxScore": assessment.maxScore,
+                        "overallLevel": assessment.overallLevel,
+                    },
+                )
+                try:
+                    opinion_start = time.time()
+                    opinion = await self.assessment_opinion_generator.generate_sdq_a_summary_simple(
+                        total_score=assessment.totalScore,
+                        max_score=assessment.maxScore,
+                        overall_level=assessment.overallLevel,
+                        child_context=assessment_child_context,
+                    )
+                    opinion_duration = time.time() - opinion_start
+
+                    generated_summary = BaseAssessmentSummary(
+                        summaryLines=opinion.key_findings[:3] if opinion.key_findings else [],
+                        expertOpinion=opinion.expert_opinion,
+                        keyFindings=opinion.key_findings,
+                        recommendations=opinion.recommendations,
+                        confidenceScore=opinion.confidence_score,
+                    )
+
+                    logger.info(
+                        "[INTEGRATED_REPORT] SDQ-A 요약 자동 생성 완료",
+                        extra={
+                            "duration": _format_duration(opinion_duration),
+                            "confidence": opinion.confidence_score,
+                            "key_findings_count": len(opinion.key_findings),
+                        },
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "[INTEGRATED_REPORT] SDQ-A 요약 자동 생성 실패",
+                        extra={"error": str(e)},
+                    )
+
+            # CRTES-R 검사 요약 생성
+            elif assessment_type == "CRTES_R":
+                logger.info(
+                    "[INTEGRATED_REPORT] CRTES-R 요약 자동 생성 시작",
+                    extra={
+                        "totalScore": assessment.totalScore,
+                        "maxScore": assessment.maxScore,
+                        "overallLevel": assessment.overallLevel,
+                    },
+                )
+                try:
+                    opinion_start = time.time()
+                    opinion = await self.assessment_opinion_generator.generate_crtes_r_summary_simple(
+                        total_score=assessment.totalScore,
+                        max_score=assessment.maxScore,
+                        overall_level=assessment.overallLevel,
+                        child_context=assessment_child_context,
+                    )
+                    opinion_duration = time.time() - opinion_start
+
+                    generated_summary = BaseAssessmentSummary(
+                        summaryLines=opinion.key_findings[:3] if opinion.key_findings else [],
+                        expertOpinion=opinion.expert_opinion,
+                        keyFindings=opinion.key_findings,
+                        recommendations=opinion.recommendations,
+                        confidenceScore=opinion.confidence_score,
+                    )
+
+                    logger.info(
+                        "[INTEGRATED_REPORT] CRTES-R 요약 자동 생성 완료",
+                        extra={
+                            "duration": _format_duration(opinion_duration),
+                            "confidence": opinion.confidence_score,
+                            "key_findings_count": len(opinion.key_findings),
+                        },
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "[INTEGRATED_REPORT] CRTES-R 요약 자동 생성 실패",
+                        extra={"error": str(e)},
+                    )
+
+            # 생성된 요약을 assessment에 할당
+            if generated_summary:
+                assessment.summary = generated_summary
 
 
 # =============================================================================
