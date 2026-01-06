@@ -16,6 +16,9 @@ from yeirin_ai.domain.integrated_report.models import (
     IntegratedReportRequest,
     IntegratedReportResult,
 )
+from yeirin_ai.domain.integrated_report.models import (
+    ConversationAnalysis as ConversationAnalysisModel,
+)
 from yeirin_ai.infrastructure.document import CounselRequestDocxFiller, DocxToPdfConverter
 from yeirin_ai.infrastructure.document.government_docx_filler import GovernmentDocxFiller
 from yeirin_ai.infrastructure.llm.assessment_opinion_generator import (
@@ -23,6 +26,12 @@ from yeirin_ai.infrastructure.llm.assessment_opinion_generator import (
 )
 from yeirin_ai.infrastructure.llm.assessment_opinion_generator import (
     ChildContext as AssessmentChildContext,
+)
+from yeirin_ai.infrastructure.llm.conversation_analyzer import (
+    ChildContext as ConversationChildContext,
+)
+from yeirin_ai.infrastructure.llm.conversation_analyzer import (
+    ConversationAnalyzer,
 )
 from yeirin_ai.infrastructure.llm.recommender_opinion_generator import (
     ChildContext,
@@ -76,6 +85,7 @@ class IntegratedReportService:
         self.pdf_merger = PDFMerger()
         self.recommender_opinion_generator = RecommenderOpinionGenerator()
         self.assessment_opinion_generator = AssessmentOpinionGenerator()
+        self.conversation_analyzer = ConversationAnalyzer()
 
     async def process(self, request: IntegratedReportRequest) -> IntegratedReportResult:
         """통합 보고서를 생성합니다.
@@ -182,6 +192,59 @@ class IntegratedReportService:
 
             # 1.5. SDQ-A/CRTES-R 요약 자동 생성 (summary가 없는 경우)
             await self._generate_missing_assessment_summaries(request)
+
+            # 1.6. Soul-E 대화내역 분석 (새 문서 포맷 섹션 4.2)
+            if request.child_id and not request.conversationAnalysis:
+                try:
+                    logger.info(
+                        "[INTEGRATED_REPORT] Step 1.6: Soul-E 대화 분석 시작...",
+                        extra={"child_id": request.child_id},
+                    )
+                    analysis_start = time.time()
+
+                    # 아동 컨텍스트 구성 (ConversationAnalyzer용)
+                    conversation_child_context = ConversationChildContext(
+                        name=request.child_name,
+                        age=request.basic_info.childInfo.age if request.basic_info else None,
+                        gender=request.basic_info.childInfo.gender if request.basic_info else None,
+                        goals=request.request_motivation.goals if request.request_motivation else None,
+                    )
+
+                    # Soul-E 대화내역 분석
+                    analysis_result = await self.conversation_analyzer.analyze_from_child_id(
+                        child_id=request.child_id,
+                        child_context=conversation_child_context,
+                    )
+
+                    # 결과를 domain 모델로 매핑
+                    request.conversationAnalysis = ConversationAnalysisModel(
+                        summaryLines=analysis_result.summary_lines,
+                        expertAnalysis=analysis_result.expert_analysis,
+                        keyObservations=analysis_result.key_observations,
+                        emotionalKeywords=analysis_result.emotional_keywords,
+                        recommendedFocusAreas=analysis_result.recommended_focus_areas,
+                        confidenceScore=analysis_result.confidence_score,
+                        sessionCount=analysis_result.session_count,
+                        messageCount=analysis_result.message_count,
+                    )
+
+                    analysis_duration = time.time() - analysis_start
+                    logger.info(
+                        "[INTEGRATED_REPORT] Step 1.6 완료: Soul-E 대화 분석",
+                        extra={
+                            "child_id": request.child_id,
+                            "confidence": analysis_result.confidence_score,
+                            "message_count": analysis_result.message_count,
+                            "session_count": analysis_result.session_count,
+                            "duration": _format_duration(analysis_duration),
+                        },
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "[INTEGRATED_REPORT] Soul-E 대화 분석 실패, 기본값 사용",
+                        extra={"child_id": request.child_id, "error": str(e)},
+                    )
+                    # 분석 실패해도 계속 진행 (기본 메시지가 표시됨)
 
             # 2. 상담의뢰지 DOCX 템플릿 채우기
             step2_start = time.time()
