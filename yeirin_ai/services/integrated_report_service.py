@@ -614,8 +614,10 @@ class IntegratedReportService:
                     )
                     opinion_duration = time.time() - opinion_start
 
+                    # SDQ-A는 6줄 필요: 강점 3줄 + 난점 3줄 (docx_filler에서 분리 사용)
+                    # opinion.summary_lines에 6줄이 생성됨
                     generated_summary = BaseAssessmentSummary(
-                        summaryLines=opinion.key_findings[:3] if opinion.key_findings else [],
+                        summaryLines=opinion.summary_lines if opinion.summary_lines else [],
                         expertOpinion=opinion.expert_opinion,
                         keyFindings=opinion.key_findings,
                         recommendations=opinion.recommendations,
@@ -627,7 +629,7 @@ class IntegratedReportService:
                         extra={
                             "duration": _format_duration(opinion_duration),
                             "confidence": opinion.confidence_score,
-                            "key_findings_count": len(opinion.key_findings),
+                            "summary_lines_count": len(opinion.summary_lines),
                         },
                     )
                 except Exception as e:
@@ -656,8 +658,9 @@ class IntegratedReportService:
                     )
                     opinion_duration = time.time() - opinion_start
 
+                    # CRTES-R은 3줄 요약 사용
                     generated_summary = BaseAssessmentSummary(
-                        summaryLines=opinion.key_findings[:3] if opinion.key_findings else [],
+                        summaryLines=opinion.summary_lines if opinion.summary_lines else [],
                         expertOpinion=opinion.expert_opinion,
                         keyFindings=opinion.key_findings,
                         recommendations=opinion.recommendations,
@@ -669,7 +672,7 @@ class IntegratedReportService:
                         extra={
                             "duration": _format_duration(opinion_duration),
                             "confidence": opinion.confidence_score,
-                            "key_findings_count": len(opinion.key_findings),
+                            "summary_lines_count": len(opinion.summary_lines),
                         },
                     )
                 except Exception as e:
