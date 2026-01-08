@@ -59,7 +59,7 @@ def sample_basic_info(sample_child_info) -> BasicInfo:
     return BasicInfo(
         childInfo=sample_child_info,
         careType="PRIORITY",
-        priorityReason="LOW_INCOME",
+        priorityReasons=["LOW_INCOME"],
         protectedChildInfo=None,
     )
 
@@ -70,7 +70,7 @@ def sample_basic_info_with_protected_child(sample_child_info) -> BasicInfo:
     return BasicInfo(
         childInfo=sample_child_info,
         careType="PRIORITY",
-        priorityReason="LOW_INCOME",
+        priorityReasons=["LOW_INCOME"],
         protectedChildInfo=ProtectedChildInfo(
             type="CHILD_FACILITY",
             reason="GUARDIAN_ABSENCE",
@@ -367,10 +367,25 @@ class TestFillCareTypeTable:
 
         with patch.object(Path, "exists", return_value=True):
             filler = CounselRequestDocxFiller()
-            filler._check_priority_reason(mock_document.tables[3], "LOW_INCOME")
+            filler._check_priority_reasons(mock_document.tables[3], ["LOW_INCOME"])
 
             # 차상위계층 체크 확인
             assert "☑ 차상위계층" in mock_document.tables[3].rows[0].cells[2].text
+
+    def test_우선돌봄_세부_사유_복수_선택을_체크한다(self, sample_report_request, mock_document):
+        """복수 선택된 우선돌봄 세부 사유가 모두 체크되는지 확인."""
+        mock_document.tables[3].rows[0].cells[2].text = "□ 기초생활보장 수급권자\n□ 차상위계층 가구의 아동"
+        mock_document.tables[3].rows[0].cells[3].text = "□ 한부모가족의 아동\n□ 다문화가족의 아동"
+
+        with patch.object(Path, "exists", return_value=True):
+            filler = CounselRequestDocxFiller()
+            filler._check_priority_reasons(
+                mock_document.tables[3], ["LOW_INCOME", "SINGLE_PARENT"]
+            )
+
+            # 차상위계층, 한부모가족 둘 다 체크 확인
+            assert "☑ 차상위계층" in mock_document.tables[3].rows[0].cells[2].text
+            assert "☑ 한부모가족" in mock_document.tables[3].rows[0].cells[3].text
 
 
 # === 보호대상 아동 테스트 ===
