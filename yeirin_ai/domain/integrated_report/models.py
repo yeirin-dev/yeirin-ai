@@ -97,7 +97,7 @@ class BasicInfo(BaseModel):
 
     childInfo: ChildInfo = Field(..., description="아동 정보")
     careType: str = Field(..., description="센터 이용 기준")
-    priorityReason: str | None = Field(None, description="우선돌봄 세부 사유")
+    priorityReasons: list[str] | None = Field(None, description="우선돌봄 세부 사유 (복수 선택 가능)")
     protectedChildInfo: ProtectedChildInfo | None = Field(
         None, description="보호대상 아동 정보 (새 문서 포맷)"
     )
@@ -424,7 +424,7 @@ class IntegratedReportRequest(BaseModel):
                         "birthDate": {"year": 2015, "month": 3, "day": 15},
                     },
                     "careType": "PRIORITY",
-                    "priorityReason": "BASIC_LIVELIHOOD",
+                    "priorityReasons": ["BASIC_LIVELIHOOD", "SINGLE_PARENT"],
                 },
                 "psychological_info": {
                     "medicalHistory": "ADHD 진단 이력",

@@ -222,7 +222,7 @@ class CounselRequestDocxFiller:
         - Row 2: 센터이용기준 | □ 돌봄특례아동 | 설명 | 설명
         """
         care_type = request.basic_info.careType
-        priority_reason = request.basic_info.priorityReason
+        priority_reasons = request.basic_info.priorityReasons or []
 
         # careType에 따라 해당 행의 체크박스를 체크
         # PRIORITY -> Row 0, GENERAL -> Row 1, SPECIAL -> Row 2
@@ -247,26 +247,33 @@ class CounselRequestDocxFiller:
                     # 빈 체크박스 유지
                     cell.text = text.replace("☑", "□")
 
-        # 우선돌봄 아동일 경우 상세 카테고리도 체크
-        if care_type == "PRIORITY" and priority_reason:
-            self._check_priority_reason(table, priority_reason)
+        # 우선돌봄 아동일 경우 상세 카테고리도 체크 (복수 선택 지원)
+        if care_type == "PRIORITY" and priority_reasons:
+            self._check_priority_reasons(table, priority_reasons)
 
-    def _check_priority_reason(self, table, priority_reason: str) -> None:
-        """우선돌봄 세부 사유 체크박스를 처리합니다.
+    def _check_priority_reasons(self, table, priority_reasons: list[str]) -> None:
+        """우선돌봄 세부 사유 체크박스를 처리합니다 (복수 선택 지원).
 
         Row 0의 Cell 2, Cell 3에 상세 카테고리 체크 항목이 있습니다.
         - Cell 2: 기초생활보장, 차상위계층, 의료급여, 장애가구
         - Cell 3: 다문화가족, 한부모가족, 조손가구, 교육비지원, 자녀2명이상
         """
-        target_text = self.PRIORITY_REASON_TEXT_MAP.get(priority_reason)
-        if not target_text:
-            logger.warning(
-                "알 수 없는 priorityReason 값",
-                extra={"priority_reason": priority_reason},
-            )
+        # 모든 선택된 사유의 한국어 텍스트 수집
+        target_texts: set[str] = set()
+        for priority_reason in priority_reasons:
+            target_text = self.PRIORITY_REASON_TEXT_MAP.get(priority_reason)
+            if target_text:
+                target_texts.add(target_text)
+            else:
+                logger.warning(
+                    "알 수 없는 priorityReason 값",
+                    extra={"priority_reason": priority_reason},
+                )
+
+        if not target_texts:
             return
 
-        # Row 0의 Cell 2, Cell 3에서 해당 텍스트 찾기
+        # Row 0의 Cell 2, Cell 3에서 해당 텍스트들 찾아 체크
         row = table.rows[0]
         for cell_idx in [2, 3]:
             if cell_idx >= len(row.cells):
@@ -274,26 +281,23 @@ class CounselRequestDocxFiller:
             cell = row.cells[cell_idx]
             cell_text = cell.text
 
-            if target_text in cell_text:
-                # 해당 라인만 체크 표시
-                lines = cell_text.split("\n")
-                new_lines = []
-                for line in lines:
+            # 셀 내 각 라인을 확인하여 선택된 사유면 체크
+            lines = cell_text.split("\n")
+            new_lines = []
+            for line in lines:
+                checked = False
+                for target_text in target_texts:
                     if target_text in line:
                         new_lines.append(line.replace("□", "☑"))
-                    else:
-                        new_lines.append(line)
-                cell.text = "\n".join(new_lines)
-                logger.debug(
-                    "우선돌봄 세부 사유 체크 완료",
-                    extra={"priority_reason": priority_reason, "target_text": target_text},
-                )
-                return
-
-        logger.warning(
-            "우선돌봄 세부 사유 텍스트를 찾을 수 없음",
-            extra={"priority_reason": priority_reason, "target_text": target_text},
-        )
+                        checked = True
+                        logger.debug(
+                            "우선돌봄 세부 사유 체크 완료",
+                            extra={"target_text": target_text},
+                        )
+                        break
+                if not checked:
+                    new_lines.append(line)
+            cell.text = "\n".join(new_lines)
 
     # 보호대상 아동 유형 → 한국어 텍스트 매핑
     PROTECTED_CHILD_TYPE_TEXT_MAP: dict[str, str] = {
