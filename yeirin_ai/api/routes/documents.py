@@ -280,7 +280,7 @@ async def request_async_summarize(
     """
     import logging
 
-    from yeirin_ai.services.document_service import process_assessment_summary_sync
+    from yeirin_ai.services.document_service import process_assessment_summary
 
     logger = logging.getLogger(__name__)
 
@@ -297,10 +297,11 @@ async def request_async_summarize(
         },
     )
 
-    # FastAPI BackgroundTasks 사용 (동기 래퍼 함수)
+    # FastAPI BackgroundTasks는 async 함수를 직접 실행 가능
+    # asyncio.run() 사용하는 동기 래퍼 대신 async 함수 직접 사용
     print("[API] BackgroundTasks.add_task() 호출", flush=True)
     background_tasks.add_task(
-        process_assessment_summary_sync,
+        process_assessment_summary,
         session_id=request.session_id,
         child_name=request.child_name,
         assessment_type=request.assessment_type,
