@@ -272,7 +272,7 @@ class TestIntegratedReportServiceProcess:
         """사회서비스 추천서가 없으면 상담의뢰지와 KPRC만 병합한다."""
         # Given: S3 다운로드 및 업로드 모킹
         with patch.object(
-            mock_service, "_download_kprc_pdf", new_callable=AsyncMock
+            mock_service, "_download_assessment_pdf", new_callable=AsyncMock
         ) as mock_download:
             mock_download.return_value = b"%PDF-1.4 kprc"
 
@@ -302,7 +302,7 @@ class TestIntegratedReportServiceProcess:
         """사회서비스 추천서가 있으면 3개 PDF를 병합한다."""
         # Given
         with patch.object(
-            mock_service, "_download_kprc_pdf", new_callable=AsyncMock
+            mock_service, "_download_assessment_pdf", new_callable=AsyncMock
         ) as mock_download:
             mock_download.return_value = b"%PDF-1.4 kprc"
 
@@ -338,7 +338,7 @@ class TestIntegratedReportServiceProcess:
         mock_service.pdf_converter.convert = AsyncMock(side_effect=convert_results)
 
         with patch.object(
-            mock_service, "_download_kprc_pdf", new_callable=AsyncMock
+            mock_service, "_download_assessment_pdf", new_callable=AsyncMock
         ) as mock_download:
             mock_download.return_value = kprc_pdf
 
@@ -415,7 +415,7 @@ class TestIntegratedReportServiceDownloadKprcPdf:
 
             # When & Then
             with pytest.raises(IntegratedReportServiceError) as exc_info:
-                await service._download_kprc_pdf("test-key")
+                await service._download_assessment_pdf("test-key")
 
             assert "URL 생성 실패" in str(exc_info.value)
 
@@ -465,7 +465,7 @@ class TestIntegratedReportServiceMetadata:
         )
 
         with patch.object(
-            mock_service, "_download_kprc_pdf", new_callable=AsyncMock
+            mock_service, "_download_assessment_pdf", new_callable=AsyncMock
         ) as mock_download:
             mock_download.return_value = b"%PDF-1.4 kprc"
 

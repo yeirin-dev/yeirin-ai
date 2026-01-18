@@ -97,7 +97,7 @@ class TestDocumentService:
         """바이트 데이터의 PDF를 요약한다."""
         # Given
         service = DocumentService()
-        service.pdf_extractor.extract_from_bytes = MagicMock(
+        service.pdf_extractor.extract_section_from_bytes = MagicMock(
             return_value="추출된 텍스트 내용"
         )
         service.summarizer.summarize_document = AsyncMock(return_value=sample_summary)
@@ -110,13 +110,13 @@ class TestDocumentService:
 
         # Then
         assert result.document_type == DocumentType.KPRC_REPORT
-        service.pdf_extractor.extract_from_bytes.assert_called_once()
+        service.pdf_extractor.extract_section_from_bytes.assert_called()
 
     async def test_PDF에서_텍스트가_추출되지_않으면_에러가_발생한다(self) -> None:
         """PDF에서 텍스트가 추출되지 않으면 에러가 발생한다."""
         # Given
         service = DocumentService()
-        service.pdf_extractor.extract_from_bytes = MagicMock(return_value="")
+        service.pdf_extractor.extract_section_from_bytes = MagicMock(return_value="")
 
         # When & Then
         with pytest.raises(DocumentServiceError, match="텍스트를 추출할 수 없습니다"):
