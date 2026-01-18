@@ -195,7 +195,7 @@ class TestConversationAnalyzerPromptBuilding:
         system_prompt = analyzer._get_system_prompt()
 
         # Then
-        assert "예이린" in system_prompt
+        assert "소울이" in system_prompt
         assert "강점 우선" in system_prompt
         assert "진단 금지" in system_prompt
         assert "정서 상태" in system_prompt
