@@ -218,6 +218,38 @@ class SdqASummary(BaseAssessmentSummary):
 # =============================================================================
 
 
+class KprcTScores(BaseModel):
+    """KPRC T점수 (GPT Vision으로 PDF에서 추출).
+
+    바우처 추천 대상 판별 기준:
+    - ERS ≤ 30T (자아탄력성 - 낮을수록 위험)
+    - 나머지 12개 척도 중 하나라도 ≥ 65T
+    """
+
+    ers_t_score: int | None = Field(None, description="자아탄력성 T점수 (≤30T 위험)")
+    icn_t_score: int | None = Field(None, description="비일관성 T점수")
+    f_t_score: int | None = Field(None, description="비전형 T점수")
+    vdl_t_score: int | None = Field(None, description="자기보호 T점수")
+    pdl_t_score: int | None = Field(None, description="타인보호 T점수")
+    anx_t_score: int | None = Field(None, description="불안 T점수")
+    dep_t_score: int | None = Field(None, description="우울 T점수")
+    som_t_score: int | None = Field(None, description="신체화 T점수")
+    dlq_t_score: int | None = Field(None, description="비행 T점수")
+    hpr_t_score: int | None = Field(None, description="과잉행동 T점수")
+    fam_t_score: int | None = Field(None, description="가족관계 T점수")
+    soc_t_score: int | None = Field(None, description="사회관계 T점수")
+    psy_t_score: int | None = Field(None, description="정신증 T점수")
+
+
+class VoucherCriteria(BaseModel):
+    """바우처 기준 충족 정보."""
+
+    meets_criteria: bool = Field(..., description="바우처 기준 충족 여부")
+    risk_scales: list[str] = Field(
+        default_factory=list, description="기준 충족 척도 목록 (예: ['ERS', 'ANX'])"
+    )
+
+
 class AttachedAssessment(BaseModel):
     """첨부된 개별 검사 결과 정보."""
 
@@ -232,6 +264,9 @@ class AttachedAssessment(BaseModel):
     )
     scoredAt: str | None = Field(None, description="채점 일시")
     summary: BaseAssessmentSummary | None = Field(None, description="AI 생성 요약")
+    # KPRC T점수 (GPT Vision 추출 결과)
+    kprcTScores: KprcTScores | None = Field(None, description="KPRC T점수 (바우처 판별용)")
+    voucherCriteria: VoucherCriteria | None = Field(None, description="바우처 기준 충족 정보")
 
 
 # =============================================================================

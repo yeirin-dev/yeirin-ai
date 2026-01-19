@@ -238,7 +238,11 @@ class TestAssessmentOpinionGeneratorSdqA:
 
         # Then
         assert isinstance(result, AssessmentOpinion)
-        assert len(result.summary_lines) == 3
+        # 첫줄에 점수 정보가 추가되어 4줄이 됨 (점수줄 + 3줄 소견)
+        assert len(result.summary_lines) == 4
+        # 첫줄에 점수 정보 확인
+        assert "강점" in result.summary_lines[0]
+        assert "난점" in result.summary_lines[0]
         assert "홍길동" in result.expert_opinion
         assert result.confidence_score == 0.6
 
@@ -376,9 +380,12 @@ class TestAssessmentOpinionGeneratorCrtesR:
 
         # Then
         assert isinstance(result, AssessmentOpinion)
-        assert len(result.summary_lines) == 3
+        # 첫줄에 점수 정보가 추가되어 4줄이 됨 (점수줄 + 3줄 소견)
+        assert len(result.summary_lines) == 4
+        # 첫줄에 총점 정보 확인
+        assert "총점" in result.summary_lines[0]
+        assert "45" in result.summary_lines[0]
         assert "홍길동" in result.expert_opinion
-        assert "45" in result.expert_opinion
         assert result.confidence_score == 0.6
 
     @pytest.mark.asyncio

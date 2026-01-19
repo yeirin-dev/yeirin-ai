@@ -449,23 +449,123 @@ class CounselRequestDocxFiller:
         # 5) 통합 AI 소견 (Row 11)
         self._fill_integrated_opinion_section(table, request)
 
+    # KPRC 척도명 → 한국어 매핑
+    KPRC_SCALE_NAME_MAP: dict[str, str] = {
+        "ERS": "자아탄력성",
+        "ICN": "비일관성",
+        "F": "비전형",
+        "VDL": "자기보호",
+        "PDL": "타인보호",
+        "ANX": "불안",
+        "DEP": "우울",
+        "SOM": "신체화",
+        "DLQ": "비행",
+        "HPR": "과잉행동",
+        "FAM": "가족관계",
+        "SOC": "사회관계",
+        "PSY": "정신증",
+    }
+
     def _fill_kprc_section(self, table, request: IntegratedReportRequest) -> None:
-        """Row 2: KPRC 검사 소견을 채웁니다."""
+        """Row 2: KPRC 검사 소견을 채웁니다.
+
+        바우처 기준 충족 시 첫줄에 위험 척도와 T점수를 표시합니다.
+        예: "바우처 기준 충족: 자아탄력성(ERS) 28T, 불안(ANX) 72T"
+        """
         if len(table.rows) <= 2:
             return
 
         cell = table.rows[2].cells[0]
         kprc = request.get_kprc_summary_for_doc()
 
+        # KPRC 검사 결과에서 T점수 및 바우처 기준 정보 가져오기
+        kprc_assessment = self._get_kprc_assessment(request)
+        voucher_line = self._build_kprc_voucher_line(kprc_assessment)
+
         if kprc and kprc.summaryLines:
-            # 3줄 요약만 표시 (새 포맷)
-            content = "\n".join(f"• {line}" for line in kprc.summaryLines[:3])
+            content_lines: list[str] = []
+
+            # 바우처 기준 충족 시 첫줄에 T점수 정보 추가
+            if voucher_line:
+                content_lines.append(voucher_line)
+
+            # 3줄 요약 표시 (새 포맷)
+            for line in kprc.summaryLines[:3]:
+                content_lines.append(f"• {line}")
+
+            content = "\n".join(content_lines)
             self._set_cell_text_with_font(cell, content, font_size=10)
         else:
             self._set_cell_text_with_font(cell, "검사 결과가 없습니다.", font_size=10)
 
         for para in cell.paragraphs:
             para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+    def _get_kprc_assessment(self, request: IntegratedReportRequest):
+        """KPRC 검사 결과를 가져옵니다."""
+        if not request.attached_assessments:
+            return None
+
+        for assessment in request.attached_assessments:
+            if assessment.assessmentType == "KPRC_CO_SG_E":
+                return assessment
+
+        return None
+
+    def _build_kprc_voucher_line(self, kprc_assessment) -> str | None:
+        """KPRC 바우처 기준 충족 시 첫줄 텍스트를 생성합니다.
+
+        예: "바우처 기준 충족: 자아탄력성(ERS) 28T, 불안(ANX) 72T"
+        """
+        if not kprc_assessment:
+            return None
+
+        voucher_criteria = kprc_assessment.voucherCriteria
+        t_scores = kprc_assessment.kprcTScores
+
+        if not voucher_criteria or not voucher_criteria.meets_criteria:
+            return None
+
+        if not t_scores or not voucher_criteria.risk_scales:
+            return None
+
+        # 위험 척도별 T점수 수집
+        risk_score_parts: list[str] = []
+        for scale_name in voucher_criteria.risk_scales:
+            korean_name = self.KPRC_SCALE_NAME_MAP.get(scale_name, scale_name)
+            t_score = self._get_t_score_by_scale_name(t_scores, scale_name)
+
+            if t_score is not None:
+                risk_score_parts.append(f"{korean_name}({scale_name}) {t_score}T")
+
+        if not risk_score_parts:
+            return None
+
+        return f"바우처 기준 충족: {', '.join(risk_score_parts)}"
+
+    def _get_t_score_by_scale_name(self, t_scores, scale_name: str) -> int | None:
+        """척도명으로 T점수를 가져옵니다."""
+        score_field_map = {
+            "ERS": "ers_t_score",
+            "ICN": "icn_t_score",
+            "F": "f_t_score",
+            "VDL": "vdl_t_score",
+            "PDL": "pdl_t_score",
+            "ANX": "anx_t_score",
+            "DEP": "dep_t_score",
+            "SOM": "som_t_score",
+            "DLQ": "dlq_t_score",
+            "HPR": "hpr_t_score",
+            "FAM": "fam_t_score",
+            "SOC": "soc_t_score",
+            "PSY": "psy_t_score",
+        }
+
+        field_name = score_field_map.get(scale_name)
+        if not field_name:
+            return None
+
+        return getattr(t_scores, field_name, None)
 
     def _fill_crtes_r_section(self, table, request: IntegratedReportRequest) -> None:
         """Row 4: CRTES-R 검사 소견을 채웁니다."""
