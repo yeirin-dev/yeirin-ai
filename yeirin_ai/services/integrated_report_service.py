@@ -15,11 +15,13 @@ from yeirin_ai.domain.integrated_report.models import (
     BaseAssessmentSummary,
     IntegratedReportRequest,
     IntegratedReportResult,
+    KprcTScores,
 )
 from yeirin_ai.infrastructure.document import CounselRequestDocxFiller, DocxToPdfConverter
 from yeirin_ai.infrastructure.document.government_docx_filler import GovernmentDocxFiller
 from yeirin_ai.infrastructure.llm.assessment_opinion_generator import (
     AssessmentOpinionGenerator,
+    KprcTScoresData,
 )
 from yeirin_ai.infrastructure.llm.assessment_opinion_generator import (
     ChildContext as AssessmentChildContext,
@@ -48,6 +50,25 @@ def _format_duration(seconds: float) -> str:
     if seconds < 1:
         return f"{seconds * 1000:.0f}ms"
     return f"{seconds:.2f}s"
+
+
+def _has_any_kprc_t_score(t_scores: KprcTScores) -> bool:
+    """KPRC T점수가 하나라도 있는지 확인합니다."""
+    return any([
+        t_scores.ers_t_score is not None,
+        t_scores.icn_t_score is not None,
+        t_scores.f_t_score is not None,
+        t_scores.vdl_t_score is not None,
+        t_scores.pdl_t_score is not None,
+        t_scores.anx_t_score is not None,
+        t_scores.dep_t_score is not None,
+        t_scores.som_t_score is not None,
+        t_scores.dlq_t_score is not None,
+        t_scores.hpr_t_score is not None,
+        t_scores.fam_t_score is not None,
+        t_scores.soc_t_score is not None,
+        t_scores.psy_t_score is not None,
+    ])
 
 
 class IntegratedReportServiceError(Exception):
@@ -568,10 +589,11 @@ class IntegratedReportService:
     async def _generate_missing_assessment_summaries(
         self, request: IntegratedReportRequest
     ) -> None:
-        """SDQ-A/CRTES-R 검사 결과의 누락된 요약을 자동 생성합니다.
+        """SDQ-A/CRTES-R/KPRC 검사 결과의 누락된 요약을 자동 생성합니다.
 
-        summary가 없는 SDQ-A/CRTES-R 검사에 대해 LLM을 사용하여
-        간소화된 요약(totalScore, maxScore, overallLevel 기반)을 생성합니다.
+        summary가 없는 검사에 대해 LLM을 사용하여 요약을 생성합니다:
+        - SDQ-A/CRTES-R: totalScore, maxScore, overallLevel 기반
+        - KPRC: T점수 데이터 기반 (kprcTScores)
 
         Args:
             request: 통합 보고서 생성 요청 (in-place 수정됨)
@@ -679,6 +701,72 @@ class IntegratedReportService:
                     logger.warning(
                         "[INTEGRATED_REPORT] CRTES-R 요약 자동 생성 실패",
                         extra={"error": str(e)},
+                    )
+
+            # KPRC 검사 요약 생성 (T점수 기반)
+            elif assessment_type == "KPRC_CO_SG_E":
+                # T점수 데이터가 있는 경우에만 생성
+                if assessment.kprcTScores and _has_any_kprc_t_score(assessment.kprcTScores):
+                    logger.info(
+                        "[INTEGRATED_REPORT] KPRC 요약 자동 생성 시작",
+                        extra={
+                            "ers_t_score": assessment.kprcTScores.ers_t_score,
+                            "anx_t_score": assessment.kprcTScores.anx_t_score,
+                            "dep_t_score": assessment.kprcTScores.dep_t_score,
+                        },
+                    )
+                    try:
+                        opinion_start = time.time()
+
+                        # KprcTScores → KprcTScoresData 변환
+                        t_scores_data = KprcTScoresData(
+                            ers_t_score=assessment.kprcTScores.ers_t_score,
+                            icn_t_score=assessment.kprcTScores.icn_t_score,
+                            f_t_score=assessment.kprcTScores.f_t_score,
+                            vdl_t_score=assessment.kprcTScores.vdl_t_score,
+                            pdl_t_score=assessment.kprcTScores.pdl_t_score,
+                            anx_t_score=assessment.kprcTScores.anx_t_score,
+                            dep_t_score=assessment.kprcTScores.dep_t_score,
+                            som_t_score=assessment.kprcTScores.som_t_score,
+                            dlq_t_score=assessment.kprcTScores.dlq_t_score,
+                            hpr_t_score=assessment.kprcTScores.hpr_t_score,
+                            fam_t_score=assessment.kprcTScores.fam_t_score,
+                            soc_t_score=assessment.kprcTScores.soc_t_score,
+                            psy_t_score=assessment.kprcTScores.psy_t_score,
+                        )
+
+                        opinion = await self.assessment_opinion_generator.generate_kprc_summary(
+                            t_scores=t_scores_data,
+                            child_context=assessment_child_context,
+                        )
+                        opinion_duration = time.time() - opinion_start
+
+                        # KPRC은 3줄 요약 사용
+                        generated_summary = BaseAssessmentSummary(
+                            summaryLines=opinion.summary_lines if opinion.summary_lines else [],
+                            expertOpinion=opinion.expert_opinion,
+                            keyFindings=opinion.key_findings,
+                            recommendations=opinion.recommendations,
+                            confidenceScore=opinion.confidence_score,
+                        )
+
+                        logger.info(
+                            "[INTEGRATED_REPORT] KPRC 요약 자동 생성 완료",
+                            extra={
+                                "duration": _format_duration(opinion_duration),
+                                "confidence": opinion.confidence_score,
+                                "summary_lines_count": len(opinion.summary_lines),
+                            },
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "[INTEGRATED_REPORT] KPRC 요약 자동 생성 실패",
+                            extra={"error": str(e)},
+                        )
+                else:
+                    logger.info(
+                        "[INTEGRATED_REPORT] KPRC T점수 데이터 없음 - 요약 생성 건너뜀",
+                        extra={"assessment_type": assessment_type},
                     )
 
             # 생성된 요약을 assessment에 할당
