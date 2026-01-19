@@ -1,6 +1,7 @@
 """OpenAI 기반 검사 소견 생성기.
 
-SDQ-A (강점·난점 설문지) 및 CRTES-R (아동 외상 반응 척도) 검사 결과를
+SDQ-A (강점·난점 설문지), CRTES-R (아동 외상 반응 척도),
+KPRC (한국 아동·청소년 인성평정척도) 검사 결과를
 분석하여 예이린만의 재해석 소견을 생성합니다.
 """
 
@@ -98,6 +99,137 @@ class CrtesRScores:
             "high_risk": "고위험",
         }
         return level_map.get(self.risk_level, "미정")
+
+
+@dataclass
+class KprcTScoresData:
+    """KPRC T점수 데이터.
+
+    13개 척도의 T점수를 담습니다.
+    - ERS (자아탄력성): ≤30T가 위험 (낮을수록 위험)
+    - 나머지 12개 척도: ≥65T가 위험 (높을수록 위험)
+    """
+
+    ers_t_score: int | None = None  # 자아탄력성
+    icn_t_score: int | None = None  # 비일관성
+    f_t_score: int | None = None  # 비전형
+    vdl_t_score: int | None = None  # 자기보호
+    pdl_t_score: int | None = None  # 타인보호
+    anx_t_score: int | None = None  # 불안
+    dep_t_score: int | None = None  # 우울
+    som_t_score: int | None = None  # 신체화
+    dlq_t_score: int | None = None  # 비행
+    hpr_t_score: int | None = None  # 과잉행동
+    fam_t_score: int | None = None  # 가족관계
+    soc_t_score: int | None = None  # 사회관계
+    psy_t_score: int | None = None  # 정신증
+
+    # 척도명 매핑
+    SCALE_NAMES: dict = field(default_factory=lambda: {
+        "ers": "자아탄력성",
+        "icn": "비일관성",
+        "f": "비전형",
+        "vdl": "자기보호",
+        "pdl": "타인보호",
+        "anx": "불안",
+        "dep": "우울",
+        "som": "신체화",
+        "dlq": "비행",
+        "hpr": "과잉행동",
+        "fam": "가족관계",
+        "soc": "사회관계",
+        "psy": "정신증",
+    })
+
+    def get_risk_scales(self) -> list[str]:
+        """위험 기준을 충족하는 척도 목록을 반환합니다.
+
+        - ERS ≤ 30T (낮을수록 위험)
+        - 나머지 12개 척도 ≥ 65T (높을수록 위험)
+        """
+        risk_scales = []
+
+        # ERS는 낮을수록 위험
+        if self.ers_t_score is not None and self.ers_t_score <= 30:
+            risk_scales.append("ERS (자아탄력성)")
+
+        # 나머지 척도는 높을수록 위험
+        high_risk_scales = [
+            ("icn", self.icn_t_score),
+            ("f", self.f_t_score),
+            ("vdl", self.vdl_t_score),
+            ("pdl", self.pdl_t_score),
+            ("anx", self.anx_t_score),
+            ("dep", self.dep_t_score),
+            ("som", self.som_t_score),
+            ("dlq", self.dlq_t_score),
+            ("hpr", self.hpr_t_score),
+            ("fam", self.fam_t_score),
+            ("soc", self.soc_t_score),
+            ("psy", self.psy_t_score),
+        ]
+
+        for scale_key, score in high_risk_scales:
+            if score is not None and score >= 65:
+                scale_name = self.SCALE_NAMES.get(scale_key, scale_key.upper())
+                risk_scales.append(f"{scale_key.upper()} ({scale_name})")
+
+        return risk_scales
+
+    def get_notable_scales(self) -> dict[str, list[tuple[str, int]]]:
+        """주목할 만한 척도들을 분류하여 반환합니다.
+
+        Returns:
+            {"strength": [(척도명, 점수)], "caution": [(척도명, 점수)], "risk": [(척도명, 점수)]}
+        """
+        result: dict[str, list[tuple[str, int]]] = {
+            "strength": [],  # 강점 (ERS ≥ 50 또는 기타 척도 ≤ 45)
+            "caution": [],   # 주의 (ERS 31-40 또는 기타 척도 55-64)
+            "risk": [],      # 위험 (ERS ≤ 30 또는 기타 척도 ≥ 65)
+        }
+
+        # ERS 분류 (낮을수록 위험)
+        if self.ers_t_score is not None:
+            if self.ers_t_score >= 50:
+                result["strength"].append(("자아탄력성", self.ers_t_score))
+            elif self.ers_t_score >= 31:
+                result["caution"].append(("자아탄력성", self.ers_t_score))
+            else:
+                result["risk"].append(("자아탄력성", self.ers_t_score))
+
+        # 나머지 척도 분류 (높을수록 위험)
+        other_scales = [
+            ("불안", self.anx_t_score),
+            ("우울", self.dep_t_score),
+            ("신체화", self.som_t_score),
+            ("비행", self.dlq_t_score),
+            ("과잉행동", self.hpr_t_score),
+            ("가족관계", self.fam_t_score),
+            ("사회관계", self.soc_t_score),
+            ("정신증", self.psy_t_score),
+        ]
+
+        for scale_name, score in other_scales:
+            if score is None:
+                continue
+            if score <= 45:
+                result["strength"].append((scale_name, score))
+            elif score <= 64:
+                result["caution"].append((scale_name, score))
+            else:
+                result["risk"].append((scale_name, score))
+
+        return result
+
+    def has_any_score(self) -> bool:
+        """T점수가 하나라도 있는지 확인합니다."""
+        return any([
+            self.ers_t_score, self.icn_t_score, self.f_t_score,
+            self.vdl_t_score, self.pdl_t_score, self.anx_t_score,
+            self.dep_t_score, self.som_t_score, self.dlq_t_score,
+            self.hpr_t_score, self.fam_t_score, self.soc_t_score,
+            self.psy_t_score,
+        ])
 
 
 @dataclass
@@ -975,4 +1107,277 @@ CRTES-R (아동 외상 반응 척도) 검사의 전체 점수와 수준 정보�
             key_findings=result.get("key_findings", []),
             recommendations=result.get("recommendations", []),
             confidence_score=float(result.get("confidence_score", 0.0)),
+        )
+
+    # =========================================================================
+    # KPRC 소견 생성
+    # =========================================================================
+
+    async def generate_kprc_summary(
+        self,
+        t_scores: KprcTScoresData,
+        child_context: ChildContext,
+    ) -> AssessmentOpinion:
+        """KPRC T점수를 바탕으로 소견을 생성합니다.
+
+        Args:
+            t_scores: KPRC T점수 데이터 (13개 척도)
+            child_context: 아동 컨텍스트 정보
+
+        Returns:
+            AssessmentOpinion 객체
+        """
+        logger.info(
+            "KPRC 소견 생성 시작",
+            extra={
+                "child_name": child_context.name,
+                "has_t_scores": t_scores.has_any_score(),
+            },
+        )
+
+        # T점수가 없으면 기본 소견 반환
+        if not t_scores.has_any_score():
+            return self._create_default_kprc_opinion(child_context)
+
+        prompt = self._build_kprc_prompt(t_scores, child_context)
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": self._get_kprc_system_prompt(),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                response_format={"type": "json_object"},
+            )
+
+            content = response.choices[0].message.content
+            if not content:
+                raise ValueError("OpenAI 응답이 비어있습니다")
+
+            result = json.loads(content)
+            opinion = self._parse_opinion(result)
+
+            logger.info(
+                "KPRC 소견 생성 완료",
+                extra={
+                    "child_name": child_context.name,
+                    "confidence": opinion.confidence_score,
+                },
+            )
+            return opinion
+
+        except Exception as e:
+            logger.error(
+                "KPRC 소견 생성 실패",
+                extra={"child_name": child_context.name, "error": str(e)},
+            )
+            return self._create_default_kprc_opinion(child_context, t_scores)
+
+    def _get_kprc_system_prompt(self) -> str:
+        """KPRC 소견용 시스템 프롬프트."""
+        return """당신은 '예이린(Yeirin)' AI 심리상담 플랫폼의 아동 심리 전문가입니다.
+
+KPRC (한국 아동·청소년 인성평정척도) 검사 결과를 바탕으로
+부모님께 전달할 따뜻하고 이해하기 쉬운 소견을 작성합니다.
+
+## KPRC 검사 개요:
+- 아동·청소년의 인성 특성을 다양한 척도로 측정
+- T점수 기준: 평균 50점, 표준편차 10점
+- 주요 척도:
+  - ERS (자아탄력성): 낮을수록 주의 필요 (≤30T가 위험)
+  - ANX (불안), DEP (우울), SOM (신체화): 높을수록 주의 필요 (≥65T가 위험)
+  - HPR (과잉행동), DLQ (비행): 높을수록 주의 필요
+  - FAM (가족관계), SOC (사회관계): 높을수록 주의 필요
+
+## 예이린 소견 원칙:
+
+1. **T점수 해석**: 주요 척도의 T점수를 명시하되 전문용어는 쉽게 설명
+2. **강점 우선**: 아이의 긍정적인 측면(높은 자아탄력성, 낮은 문제행동 등)을 먼저 언급
+3. **균형 잡힌 해석**: 관심이 필요한 영역도 성장 기회로 긍정적으로 표현
+4. **구체적 조언**: 부모님이 실천 가능한 지원 방법 제시
+5. **따뜻한 어조**: 전문적이되 친근하고 희망적인 표현
+6. **진단 금지**: 장애명이나 진단명 절대 사용 금지
+
+## 작성 형식:
+
+- **1줄**: 📊 전체 프로파일 요약 (주요 특성 언급)
+- **2줄**: 아이의 강점과 잠재력 (긍정적 척도 강조)
+- **3줄**: 관심이 필요한 영역 (성장 기회로 표현)
+- **4줄**: 부모님께 드리는 따뜻한 조언"""
+
+    def _build_kprc_prompt(
+        self,
+        t_scores: KprcTScoresData,
+        child_context: ChildContext,
+    ) -> str:
+        """KPRC 소견 프롬프트 생성."""
+        # 아동 정보 구성
+        child_parts = [f"이름: {child_context.name}"]
+        if child_context.age:
+            child_parts.append(f"나이: {child_context.age}세")
+        if child_context.gender:
+            child_parts.append(f"성별: {child_context.get_gender_korean()}")
+        child_desc = " | ".join(child_parts)
+
+        # T점수 정보 구성
+        t_score_lines = []
+        if t_scores.ers_t_score is not None:
+            t_score_lines.append(f"- ERS (자아탄력성): {t_scores.ers_t_score}T")
+        if t_scores.anx_t_score is not None:
+            t_score_lines.append(f"- ANX (불안): {t_scores.anx_t_score}T")
+        if t_scores.dep_t_score is not None:
+            t_score_lines.append(f"- DEP (우울): {t_scores.dep_t_score}T")
+        if t_scores.som_t_score is not None:
+            t_score_lines.append(f"- SOM (신체화): {t_scores.som_t_score}T")
+        if t_scores.dlq_t_score is not None:
+            t_score_lines.append(f"- DLQ (비행): {t_scores.dlq_t_score}T")
+        if t_scores.hpr_t_score is not None:
+            t_score_lines.append(f"- HPR (과잉행동): {t_scores.hpr_t_score}T")
+        if t_scores.fam_t_score is not None:
+            t_score_lines.append(f"- FAM (가족관계): {t_scores.fam_t_score}T")
+        if t_scores.soc_t_score is not None:
+            t_score_lines.append(f"- SOC (사회관계): {t_scores.soc_t_score}T")
+        if t_scores.psy_t_score is not None:
+            t_score_lines.append(f"- PSY (정신증): {t_scores.psy_t_score}T")
+
+        t_score_text = "\n".join(t_score_lines) if t_score_lines else "T점수 정보 없음"
+
+        # 주목할 척도 분류
+        notable = t_scores.get_notable_scales()
+        strength_text = ", ".join([f"{name}({score}T)" for name, score in notable["strength"]]) or "없음"
+        caution_text = ", ".join([f"{name}({score}T)" for name, score in notable["caution"]]) or "없음"
+        risk_text = ", ".join([f"{name}({score}T)" for name, score in notable["risk"]]) or "없음"
+
+        return f"""## 아동 정보:
+{child_desc}
+
+## KPRC T점수 프로파일:
+
+{t_score_text}
+
+## T점수 해석 기준:
+- 평균: 50T, 표준편차: 10T
+- ERS (자아탄력성): 높을수록 좋음, ≤30T는 관심 필요
+- 기타 척도 (ANX, DEP, SOM 등): 낮을수록 좋음, ≥65T는 관심 필요
+
+## 척도 분류:
+- 강점 영역: {strength_text}
+- 보통/주의 영역: {caution_text}
+- 관심 필요 영역: {risk_text}
+
+## 요청사항:
+
+1. 위 KPRC T점수를 바탕으로 **예이린 재해석 4줄 소견**을 작성해주세요.
+   - 1줄: 📊 프로파일 요약 - 주요 척도와 전반적 특성 설명
+   - 2줄: 아이의 강점과 잠재력 (긍정적 척도 강조)
+   - 3줄: 관심이 필요한 영역 (성장 기회로 표현)
+   - 4줄: 부모님께 드리는 따뜻한 조언
+
+2. 전문가 종합 소견을 3-4문장으로 작성해주세요.
+3. 핵심 발견 사항 2개를 정리해주세요.
+4. 가정에서 실천할 수 있는 권장 사항 2개를 제시해주세요.
+
+⚠️ 중요: 진단명(ADHD, 우울증 등)을 사용하지 마세요. T점수는 참고용이며, 아이의 성장 가능성에 초점을 맞춰주세요.
+
+응답은 반드시 다음 JSON 형식으로:
+{{
+  "summary_lines": [
+    "1줄: 프로파일 요약",
+    "2줄: 강점과 잠재력",
+    "3줄: 관심 필요 영역 (성장 기회)",
+    "4줄: 부모님께 조언"
+  ],
+  "expert_opinion": "전문가 종합 소견 (3-4문장)",
+  "key_findings": [
+    "핵심 발견 1",
+    "핵심 발견 2"
+  ],
+  "recommendations": [
+    "권장 사항 1",
+    "권장 사항 2"
+  ],
+  "confidence_score": 0.85
+}}
+""".strip()
+
+    def _create_default_kprc_opinion(
+        self,
+        child_context: ChildContext,
+        t_scores: KprcTScoresData | None = None,
+    ) -> AssessmentOpinion:
+        """KPRC 기본 소견 생성."""
+        name = child_context.name
+
+        # T점수 기반 기본 소견 구성
+        if t_scores and t_scores.has_any_score():
+            notable = t_scores.get_notable_scales()
+
+            # 강점 텍스트
+            if notable["strength"]:
+                strengths = [name for name, _ in notable["strength"][:2]]
+                strength_line = f"{name} 아동은 {', '.join(strengths)} 영역에서 양호한 수준을 보입니다."
+            else:
+                strength_line = f"{name} 아동은 전반적으로 안정적인 발달을 보이고 있습니다."
+
+            # 주의 영역 텍스트
+            if notable["risk"]:
+                risks = [name for name, _ in notable["risk"][:2]]
+                caution_line = f"{', '.join(risks)} 영역에서 관심과 지지가 도움이 될 수 있습니다."
+            elif notable["caution"]:
+                cautions = [name for name, _ in notable["caution"][:2]]
+                caution_line = f"{', '.join(cautions)} 영역에서 세심한 관심이 권장됩니다."
+            else:
+                caution_line = "현재 특별히 우려되는 영역은 관찰되지 않았습니다."
+
+            return AssessmentOpinion(
+                summary_lines=[
+                    f"KPRC 검사 결과, {name} 아동의 인성 프로파일을 확인하였습니다.",
+                    strength_line,
+                    caution_line,
+                    "아이의 강점을 인정하고 격려하는 양육이 건강한 발달에 도움이 됩니다.",
+                ],
+                expert_opinion=(
+                    f"{name} 아동의 KPRC 검사 결과, 전반적인 인성 특성을 평가하였습니다. "
+                    "아동의 강점을 바탕으로 관심이 필요한 영역을 따뜻하게 지원하면 "
+                    "건강한 발달에 도움이 됩니다."
+                ),
+                key_findings=[
+                    "KPRC 인성 프로파일 평가 완료",
+                    "아동의 강점과 관심 필요 영역 확인",
+                ],
+                recommendations=[
+                    "아이의 긍정적 행동과 노력을 구체적으로 칭찬하기",
+                    "안정적인 일상 루틴과 따뜻한 관계 유지하기",
+                ],
+                confidence_score=0.6,
+            )
+
+        # T점수 없을 때 기본 소견
+        return AssessmentOpinion(
+            summary_lines=[
+                "KPRC 검사가 완료되었습니다.",
+                f"{name} 아동은 다양한 잠재력을 가지고 있습니다.",
+                "상세 결과는 전문 상담을 통해 확인하실 수 있습니다.",
+                "아이의 강점을 발견하고 격려해주시기 바랍니다.",
+            ],
+            expert_opinion=(
+                f"{name} 아동의 KPRC 검사가 완료되었습니다. "
+                "상세한 T점수 프로파일 분석을 통해 아동의 인성 특성을 파악할 수 있습니다. "
+                "전문 상담사와 함께 결과를 해석하시면 더욱 도움이 됩니다."
+            ),
+            key_findings=[
+                "KPRC 인성검사 완료",
+                "상세 분석을 위한 전문 상담 권장",
+            ],
+            recommendations=[
+                "아이의 다양한 측면에 관심 갖기",
+                "긍정적인 양육 환경 유지하기",
+            ],
+            confidence_score=0.4,
         )
