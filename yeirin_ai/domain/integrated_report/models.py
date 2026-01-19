@@ -250,6 +250,26 @@ class VoucherCriteria(BaseModel):
     )
 
 
+class SdqScaleScore(BaseModel):
+    """SDQ-A 강점/난점 개별 점수."""
+
+    score: int | None = Field(None, description="점수")
+    maxScore: int | None = Field(None, description="만점")
+    level: int | None = Field(None, ge=1, le=3, description="수준 (1: 양호, 2: 경계선, 3: 위험)")
+    levelDescription: str | None = Field(None, description="수준 설명")
+
+
+class SdqScaleScores(BaseModel):
+    """SDQ-A 강점/난점 분리 점수.
+
+    - 강점 (사회지향 행동): 0-10점
+    - 난점 (외현화+내현화): 0-40점
+    """
+
+    strengths: SdqScaleScore | None = Field(None, description="강점 점수 (0-10점)")
+    difficulties: SdqScaleScore | None = Field(None, description="난점 점수 (0-40점)")
+
+
 class AttachedAssessment(BaseModel):
     """첨부된 개별 검사 결과 정보."""
 
@@ -267,6 +287,8 @@ class AttachedAssessment(BaseModel):
     # KPRC T점수 (GPT Vision 추출 결과)
     kprcTScores: KprcTScores | None = Field(None, description="KPRC T점수 (바우처 판별용)")
     voucherCriteria: VoucherCriteria | None = Field(None, description="바우처 기준 충족 정보")
+    # SDQ-A scaleScores (강점/난점 분리 점수)
+    sdqScaleScores: SdqScaleScores | None = Field(None, description="SDQ-A 강점/난점 점수")
 
 
 # =============================================================================

@@ -25,6 +25,7 @@ from yeirin_ai.infrastructure.document.government_docx_filler import GovernmentD
 from yeirin_ai.infrastructure.llm.assessment_opinion_generator import (
     AssessmentOpinionGenerator,
     KprcTScoresData,
+    SdqAScores,
 )
 from yeirin_ai.infrastructure.llm.assessment_opinion_generator import (
     ChildContext as AssessmentChildContext,
@@ -681,22 +682,73 @@ class IntegratedReportService:
 
             # SDQ-A 검사 요약 생성
             if assessment_type == "SDQ_A":
+                # sdqScaleScores가 있으면 강점/난점 분리 소견 생성
+                has_scale_scores = (
+                    assessment.sdqScaleScores is not None
+                    and assessment.sdqScaleScores.strengths is not None
+                    and assessment.sdqScaleScores.difficulties is not None
+                    and assessment.sdqScaleScores.strengths.score is not None
+                    and assessment.sdqScaleScores.difficulties.score is not None
+                )
+
                 logger.info(
                     "[INTEGRATED_REPORT] SDQ-A 요약 자동 생성 시작",
                     extra={
                         "totalScore": assessment.totalScore,
                         "maxScore": assessment.maxScore,
                         "overallLevel": assessment.overallLevel,
+                        "hasScaleScores": has_scale_scores,
+                        "strengthsScore": (
+                            assessment.sdqScaleScores.strengths.score
+                            if has_scale_scores else None
+                        ),
+                        "difficultiesScore": (
+                            assessment.sdqScaleScores.difficulties.score
+                            if has_scale_scores else None
+                        ),
                     },
                 )
                 try:
                     opinion_start = time.time()
-                    opinion = await self.assessment_opinion_generator.generate_sdq_a_summary_simple(
-                        total_score=assessment.totalScore,
-                        max_score=assessment.maxScore,
-                        overall_level=assessment.overallLevel,
-                        child_context=assessment_child_context,
-                    )
+
+                    if has_scale_scores:
+                        # 강점/난점 분리 소견 생성 (신규 방식)
+                        # type: ignore를 사용하지 않고 안전하게 값 추출
+                        scale_scores = assessment.sdqScaleScores
+                        assert scale_scores is not None
+                        assert scale_scores.strengths is not None
+                        assert scale_scores.difficulties is not None
+                        assert scale_scores.strengths.score is not None
+                        assert scale_scores.difficulties.score is not None
+
+                        sdq_scores = SdqAScores(
+                            strengths_score=scale_scores.strengths.score,
+                            strengths_level=scale_scores.strengths.level or 1,
+                            difficulties_score=scale_scores.difficulties.score,
+                            difficulties_level=scale_scores.difficulties.level or 1,
+                            strengths_level_description=scale_scores.strengths.levelDescription,
+                            difficulties_level_description=scale_scores.difficulties.levelDescription,
+                        )
+                        opinion = await self.assessment_opinion_generator.generate_sdq_a_opinion(
+                            scores=sdq_scores,
+                            child_context=assessment_child_context,
+                        )
+                        logger.info(
+                            "[INTEGRATED_REPORT] SDQ-A 강점/난점 분리 소견 생성 완료",
+                            extra={
+                                "strengths_score": f"{sdq_scores.strengths_score}/10",
+                                "difficulties_score": f"{sdq_scores.difficulties_score}/40",
+                            },
+                        )
+                    else:
+                        # 총점 기반 소견 생성 (레거시 방식)
+                        opinion = await self.assessment_opinion_generator.generate_sdq_a_summary_simple(
+                            total_score=assessment.totalScore,
+                            max_score=assessment.maxScore,
+                            overall_level=assessment.overallLevel,
+                            child_context=assessment_child_context,
+                        )
+
                     opinion_duration = time.time() - opinion_start
 
                     # SDQ-A는 6줄 필요: 강점 3줄 + 난점 3줄 (docx_filler에서 분리 사용)
@@ -715,6 +767,7 @@ class IntegratedReportService:
                             "duration": _format_duration(opinion_duration),
                             "confidence": opinion.confidence_score,
                             "summary_lines_count": len(opinion.summary_lines),
+                            "method": "scale_scores" if has_scale_scores else "total_score",
                         },
                     )
                 except Exception as e:
