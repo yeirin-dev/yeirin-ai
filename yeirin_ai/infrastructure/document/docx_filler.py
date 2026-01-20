@@ -507,7 +507,8 @@ class CounselRequestDocxFiller:
             return None
 
         for assessment in request.attached_assessments:
-            if assessment.assessmentType == "KPRC_CO_SG_E":
+            # KPRC 자가보고형(KPRC_CO_SG_E), 교사평정형(KPRC_CO_TG) 등 모든 KPRC 유형 지원
+            if assessment.assessmentType.startswith("KPRC"):
                 return assessment
 
         return None
