@@ -98,12 +98,15 @@ jobs:
             echo "APP_NAME=$(aws ssm get-parameter --name '/yeirin/dev/yeirin-ai/app-name' --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
             echo "APP_VERSION=$(aws ssm get-parameter --name '/yeirin/dev/yeirin-ai/app-version' --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
             echo "DATABASE_URL=$(aws ssm get-parameter --name '/yeirin/dev/yeirin-ai/database-url' --with-decryption --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
+            echo "SOUL_E_DATABASE_URL=$(aws ssm get-parameter --name '/yeirin/dev/yeirin-ai/soul-e-database-url' --with-decryption --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
             echo "OPENAI_API_KEY=$(aws ssm get-parameter --name '/yeirin/dev/common/openai-api-key' --with-decryption --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
             echo "OPENAI_MODEL=$(aws ssm get-parameter --name '/yeirin/dev/yeirin-ai/openai-model' --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
             echo "INTERNAL_API_SECRET=$(aws ssm get-parameter --name '/yeirin/dev/common/internal-api-secret' --with-decryption --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
             echo "YEIRIN_BACKEND_URL=$(aws ssm get-parameter --name '/yeirin/dev/yeirin-ai/yeirin-backend-url' --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
             echo "SOUL_E_WEBHOOK_URL=$(aws ssm get-parameter --name '/yeirin/dev/yeirin-ai/soul-e-webhook-url' --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
+            echo "SOUL_E_API_URL=$(aws ssm get-parameter --name '/yeirin/dev/yeirin-ai/soul-e-api-url' --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
             echo "CORS_ORIGINS=$(aws ssm get-parameter --name '/yeirin/dev/yeirin-ai/cors-origins' --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
+            echo "GOTENBERG_URL=$(aws ssm get-parameter --name '/yeirin/dev/yeirin-ai/gotenberg-url' --query 'Parameter.Value' --output text --region ap-northeast-2)" >> .env
 
             echo "Environment file created."
             cat .env | head -5
