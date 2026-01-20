@@ -4,9 +4,8 @@ Soul-E DB에서 검사 데이터를 조회하여 상담의뢰지 생성에 활�
 MSA 요청 데이터가 불완전할 경우 DB에서 직접 조회하여 보완합니다.
 """
 
-from dataclasses import dataclass
-
 import logging
+from dataclasses import dataclass
 
 from yeirin_ai.infrastructure.database.assessment_repository import AssessmentRepository
 from yeirin_ai.infrastructure.database.soul_e_connection import SoulEAsyncSessionLocal
@@ -116,20 +115,41 @@ class AssessmentDataService:
 
             if scale_scores:
                 # SDQ scale_scores 구조에 따라 점수 추출
-                # 구조: {"prosocial": X, "emotional": X, "conduct": X, "hyperactivity": X, "peer": X}
-                # 또는 중첩 구조: {"prosocial": {"score": X}, ...}
-                strength_score = self._extract_scale_score(scale_scores, "prosocial")
-                difficulty_score = sum(
-                    filter(
-                        None,
-                        [
-                            self._extract_scale_score(scale_scores, "emotional"),
-                            self._extract_scale_score(scale_scores, "conduct"),
-                            self._extract_scale_score(scale_scores, "hyperactivity"),
-                            self._extract_scale_score(scale_scores, "peer"),
-                        ],
-                    )
-                )
+                # 구조 1: {"strengths": {"score": 8}, "difficulties": {"score": 22}}
+                # 구조 2: {"prosocial": X, "emotional": X, "conduct": X, "hyperactivity": X, "peer": X}
+                # 구조 3: {"prosocial": {"score": X}, ...}
+
+                # 먼저 strengths/difficulties 구조 확인 (우선순위 높음)
+                if "strengths" in scale_scores:
+                    strengths_data = scale_scores.get("strengths")
+                    if isinstance(strengths_data, dict):
+                        strength_score = strengths_data.get("score")
+                    elif isinstance(strengths_data, int):
+                        strength_score = strengths_data
+
+                if "difficulties" in scale_scores:
+                    difficulties_data = scale_scores.get("difficulties")
+                    if isinstance(difficulties_data, dict):
+                        difficulty_score = difficulties_data.get("score")
+                    elif isinstance(difficulties_data, int):
+                        difficulty_score = difficulties_data
+
+                # strengths/difficulties가 없으면 개별 척도에서 추출
+                if strength_score is None:
+                    strength_score = self._extract_scale_score(scale_scores, "prosocial")
+
+                if difficulty_score is None:
+                    difficulty_score = sum(
+                        filter(
+                            None,
+                            [
+                                self._extract_scale_score(scale_scores, "emotional"),
+                                self._extract_scale_score(scale_scores, "conduct"),
+                                self._extract_scale_score(scale_scores, "hyperactivity"),
+                                self._extract_scale_score(scale_scores, "peer"),
+                            ],
+                        )
+                    ) or None  # sum이 0이면 None으로
 
             logger.info(
                 "[ASSESSMENT_DATA_SERVICE] SDQ 데이터 조회 완료",
