@@ -176,6 +176,62 @@ class KprcTScoresData:
 
         return risk_scales
 
+    def get_voucher_risk_scales(self) -> list[tuple[str, str, int]]:
+        """바우처 선정 기준을 충족하는 척도 목록을 반환합니다.
+
+        바우처 기준 (ICN, F는 타당도 척도로 제외):
+        - ERS ≤ 30T (자아탄력성 - 낮을수록 위험)
+        - VDL, PDL, ANX, DEP, SOM, DLQ, HPR, FAM, SOC, PSY ≥ 65T
+
+        Returns:
+            List of (척도영문명, 척도한글명, T점수) tuples
+        """
+        risk_scales: list[tuple[str, str, int]] = []
+
+        # ERS는 낮을수록 위험 (≤30T)
+        if self.ers_t_score is not None and self.ers_t_score <= 30:
+            risk_scales.append(("ERS", "자아탄력성", self.ers_t_score))
+
+        # 바우처 판별 대상 척도 (ICN, F 제외 - 타당도 척도)
+        voucher_scales = [
+            ("VDL", "긍정왜곡", self.vdl_t_score),
+            ("PDL", "부정왜곡", self.pdl_t_score),
+            ("ANX", "불안", self.anx_t_score),
+            ("DEP", "우울", self.dep_t_score),
+            ("SOM", "신체화", self.som_t_score),
+            ("DLQ", "비행", self.dlq_t_score),
+            ("HPR", "과잉행동", self.hpr_t_score),
+            ("FAM", "가족관계", self.fam_t_score),
+            ("SOC", "사회관계", self.soc_t_score),
+            ("PSY", "정신증", self.psy_t_score),
+        ]
+
+        for scale_key, scale_name, score in voucher_scales:
+            if score is not None and score >= 65:
+                risk_scales.append((scale_key, scale_name, score))
+
+        return risk_scales
+
+    def meets_voucher_criteria(self) -> bool:
+        """바우처 선정 기준 충족 여부를 반환합니다."""
+        return len(self.get_voucher_risk_scales()) > 0
+
+    def get_voucher_criteria_line(self) -> str:
+        """바우처 선정 기준 충족 여부를 나타내는 첫 줄 텍스트를 생성합니다.
+
+        Returns:
+            바우처 조건 충족 시: "KPRC 바우처 선정 기준 충족 척도: ERS(자아탄력성) 28T, ANX(불안) 68T"
+            미충족 시: "이 아동은 검사결과 바우처 선정 조건에는 부합하지 않습니다."
+        """
+        risk_scales = self.get_voucher_risk_scales()
+
+        if not risk_scales:
+            return "이 아동은 검사결과 바우처 선정 조건에는 부합하지 않습니다."
+
+        # 척도별 T점수 나열
+        scale_texts = [f"{key}({name}) {score}T" for key, name, score in risk_scales]
+        return f"KPRC 바우처 선정 기준 충족 척도: {', '.join(scale_texts)}"
+
     def get_notable_scales(self) -> dict[str, list[tuple[str, int]]]:
         """주목할 만한 척도들을 분류하여 반환합니다.
 
@@ -1311,24 +1367,41 @@ CRTES-R (아동 외상 반응 척도) 검사의 전체 점수와 수준 정보�
     ) -> AssessmentOpinion:
         """KPRC T점수를 바탕으로 소견을 생성합니다.
 
+        첫 줄에는 바우처 선정 기준 충족 여부가 표시됩니다:
+        - 충족 시: "KPRC 바우처 선정 기준 충족 척도: ERS(자아탄력성) 28T, ..."
+        - 미충족 시: "이 아동은 검사결과 바우처 선정 조건에는 부합하지 않습니다."
+
         Args:
             t_scores: KPRC T점수 데이터 (13개 척도)
             child_context: 아동 컨텍스트 정보
 
         Returns:
-            AssessmentOpinion 객체
+            AssessmentOpinion 객체 (첫 줄에 바우처 기준 정보 포함)
         """
+        # 바우처 기준 첫 줄 생성
+        voucher_line = t_scores.get_voucher_criteria_line()
+        meets_voucher = t_scores.meets_voucher_criteria()
+
         logger.info(
             "KPRC 소견 생성 시작",
             extra={
                 "child_name": child_context.name,
                 "has_t_scores": t_scores.has_any_score(),
+                "meets_voucher_criteria": meets_voucher,
             },
         )
 
-        # T점수가 없으면 기본 소견 반환
+        # T점수가 없으면 기본 소견 반환 (바우처 첫 줄 포함)
         if not t_scores.has_any_score():
-            return self._create_default_kprc_opinion(child_context)
+            default_opinion = self._create_default_kprc_opinion(child_context)
+            # 바우처 첫 줄 추가
+            return AssessmentOpinion(
+                summary_lines=[voucher_line] + default_opinion.summary_lines,
+                expert_opinion=default_opinion.expert_opinion,
+                key_findings=default_opinion.key_findings,
+                recommendations=default_opinion.recommendations,
+                confidence_score=default_opinion.confidence_score,
+            )
 
         prompt = self._build_kprc_prompt(t_scores, child_context)
 
@@ -1354,21 +1427,39 @@ CRTES-R (아동 외상 반응 척도) 검사의 전체 점수와 수준 정보�
             result = json.loads(content)
             opinion = self._parse_opinion(result)
 
+            # 바우처 첫 줄을 summary_lines 맨 앞에 추가
+            opinion_with_voucher = AssessmentOpinion(
+                summary_lines=[voucher_line] + opinion.summary_lines,
+                expert_opinion=opinion.expert_opinion,
+                key_findings=opinion.key_findings,
+                recommendations=opinion.recommendations,
+                confidence_score=opinion.confidence_score,
+            )
+
             logger.info(
                 "KPRC 소견 생성 완료",
                 extra={
                     "child_name": child_context.name,
                     "confidence": opinion.confidence_score,
+                    "meets_voucher_criteria": meets_voucher,
                 },
             )
-            return opinion
+            return opinion_with_voucher
 
         except Exception as e:
             logger.error(
                 "KPRC 소견 생성 실패",
                 extra={"child_name": child_context.name, "error": str(e)},
             )
-            return self._create_default_kprc_opinion(child_context, t_scores)
+            default_opinion = self._create_default_kprc_opinion(child_context, t_scores)
+            # 바우처 첫 줄 추가
+            return AssessmentOpinion(
+                summary_lines=[voucher_line] + default_opinion.summary_lines,
+                expert_opinion=default_opinion.expert_opinion,
+                key_findings=default_opinion.key_findings,
+                recommendations=default_opinion.recommendations,
+                confidence_score=default_opinion.confidence_score,
+            )
 
     def _get_kprc_system_prompt(self) -> str:
         """KPRC 소견용 시스템 프롬프트."""
