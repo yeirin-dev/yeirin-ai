@@ -610,14 +610,11 @@ class IntegratedReportService:
         )
 
         for assessment in request.attached_assessments:
-            # summary가 이미 있으면 건너뜀
-            if assessment.summary is not None:
-                continue
-
             assessment_type = assessment.assessmentType
             generated_summary: BaseAssessmentSummary | None = None
 
-            # SDQ-A 검사 요약 생성
+            # SDQ-A: scaleScores가 있으면 재생성 (강점/난점 분리 점수 표시를 위해)
+            # 기존 summary가 "총점 X/50점" 형식일 수 있으므로, scaleScores가 있으면 항상 재생성
             if assessment_type == "SDQ_A":
                 # sdqScaleScores가 있으면 강점/난점 분리 소견 생성
                 has_scale_scores = (
@@ -627,6 +624,18 @@ class IntegratedReportService:
                     and assessment.sdqScaleScores.strengths.score is not None
                     and assessment.sdqScaleScores.difficulties.score is not None
                 )
+
+                # scaleScores가 없고 기존 summary가 있으면 건너뜀
+                if not has_scale_scores and assessment.summary is not None:
+                    continue
+            else:
+                # SDQ-A 외 검사: summary가 이미 있으면 건너뜀
+                if assessment.summary is not None:
+                    continue
+
+            # SDQ-A 검사 요약 생성
+            if assessment_type == "SDQ_A":
+                # has_scale_scores는 위에서 이미 계산됨
 
                 logger.info(
                     "[INTEGRATED_REPORT] SDQ-A 요약 자동 생성 시작",
