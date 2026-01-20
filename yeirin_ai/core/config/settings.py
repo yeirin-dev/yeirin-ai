@@ -64,6 +64,12 @@ class Settings(BaseSettings):
         default="http://localhost:8000", description="Soul-E API URL (대화내역 조회)"
     )
 
+    # Soul-E Database (읽기 전용 - 검사 데이터 조회)
+    soul_e_database_url: PostgresDsn = Field(
+        default="postgresql://yeirin:yeirin123@localhost:5433/soul_e",
+        description="Soul-E PostgreSQL 연결 URL (읽기 전용)",
+    )
+
     # Yeirin 메인 백엔드 MSA 연동 설정
     yeirin_backend_url: str = Field(
         default="http://localhost:3000", description="Yeirin 메인 백엔드 URL"
