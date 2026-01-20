@@ -444,10 +444,10 @@ class IntegratedReportRequest(BaseModel):
         Returns:
             KPRC 검사소견 또는 None
         """
-        # 새 방식: attached_assessments에서 KPRC 찾기
+        # 새 방식: attached_assessments에서 KPRC 찾기 (자가보고형/교사평정형 모두 지원)
         if self.attached_assessments:
             for assessment in self.attached_assessments:
-                if assessment.assessmentType == "KPRC_CO_SG_E" and assessment.summary:
+                if assessment.assessmentType.startswith("KPRC") and assessment.summary:
                     return KprcSummary(
                         summaryLines=assessment.summary.summaryLines,
                         expertOpinion=assessment.summary.expertOpinion,

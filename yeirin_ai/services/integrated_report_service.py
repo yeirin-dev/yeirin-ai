@@ -756,8 +756,8 @@ class IntegratedReportService:
                         extra={"error": str(e)},
                     )
 
-            # KPRC 검사 요약 생성 (T점수 기반)
-            elif assessment_type == "KPRC_CO_SG_E":
+            # KPRC 검사 요약 생성 (T점수 기반) - 자가보고형/교사평정형 모두 지원
+            elif assessment_type.startswith("KPRC"):
                 # T점수 데이터가 있는 경우에만 생성
                 if assessment.kprcTScores and _has_any_kprc_t_score(assessment.kprcTScores):
                     logger.info(

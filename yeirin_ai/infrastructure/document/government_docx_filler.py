@@ -214,8 +214,8 @@ class GovernmentDocxFiller:
             # 추가 검사 결과 (CRTES-R, SDQ-A)
             if request.attached_assessments:
                 for assessment in request.attached_assessments:
-                    # KPRC는 이미 처리됨
-                    if assessment.assessmentType == "KPRC_CO_SG_E":
+                    # KPRC는 이미 처리됨 (자가보고형/교사평정형 모두)
+                    if assessment.assessmentType.startswith("KPRC"):
                         continue
                     if assessment.summary and assessment.summary.expertOpinion:
                         judgment_basis_parts.append(
@@ -277,7 +277,7 @@ class GovernmentDocxFiller:
                 # 추가 검사 권장사항 (CRTES-R, SDQ-A)
                 if request.attached_assessments:
                     for assessment in request.attached_assessments:
-                        if assessment.assessmentType == "KPRC_CO_SG_E":
+                        if assessment.assessmentType.startswith("KPRC"):
                             continue
                         if assessment.summary:
                             if assessment.summary.recommendations:
