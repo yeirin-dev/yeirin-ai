@@ -608,11 +608,25 @@ class CounselRequestDocxFiller:
     def _fill_integrated_opinion_section(
         self, table, request: IntegratedReportRequest
     ) -> None:
-        """Row 11: 예이린 AI 기반 통합 전문 소견을 채웁니다."""
+        """Row 11: 예이린 AI 기반 통합 전문 소견을 채웁니다.
+
+        서비스 레이어에서 LLM으로 사전 생성된 통합 소견을 사용합니다.
+        통합 소견이 없는 경우 폴백 로직으로 기존 방식을 사용합니다.
+        """
         if len(table.rows) <= 11:
             return
 
         cell = table.rows[11].cells[0]
+
+        # 1. 서비스 레이어에서 LLM으로 사전 생성된 통합 소견 사용 (우선)
+        if hasattr(request, "integrated_opinion") and request.integrated_opinion:
+            # LLM 생성 통합 소견은 바우처 문구를 이미 포함하고 있음
+            self._set_cell_text_with_font(cell, request.integrated_opinion, font_size=10)
+            for para in cell.paragraphs:
+                para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            return
+
+        # 2. 폴백: 기존 방식 (각 검사 소견 병합)
         content_parts: list[str] = []
 
         # 모든 검사의 전문가 소견 통합

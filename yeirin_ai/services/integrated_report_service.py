@@ -36,6 +36,10 @@ from yeirin_ai.infrastructure.llm.conversation_analyzer import (
 from yeirin_ai.infrastructure.llm.conversation_analyzer import (
     ConversationAnalyzer,
 )
+from yeirin_ai.infrastructure.llm.integrated_opinion_generator import (
+    IntegratedOpinionGenerator,
+    IntegratedOpinionInput,
+)
 from yeirin_ai.infrastructure.llm.recommender_opinion_generator import (
     ChildContext,
     RecommenderOpinion,
@@ -96,6 +100,7 @@ class IntegratedReportService:
         self.assessment_opinion_generator = AssessmentOpinionGenerator()
         self.conversation_analyzer = ConversationAnalyzer()
         self.assessment_data_service = AssessmentDataService()
+        self.integrated_opinion_generator = IntegratedOpinionGenerator()
 
     async def process(self, request: IntegratedReportRequest) -> IntegratedReportResult:
         """통합 보고서를 생성합니다.
@@ -1049,6 +1054,158 @@ class IntegratedReportService:
                 "eligible_assessments": voucher_eligibility.eligible_assessments,
             },
         )
+
+        # 통합 전문 소견 생성 (LLM 기반)
+        await self._generate_integrated_opinion(
+            request=request,
+            kprc_db_data=kprc_db_data,
+            sdq_db_data=sdq_db_data,
+            crtes_r_db_data=crtes_r_db_data,
+        )
+
+    async def _generate_integrated_opinion(
+        self,
+        request: IntegratedReportRequest,
+        kprc_db_data: KprcAssessmentData | None,
+        sdq_db_data: SdqAssessmentData | None,
+        crtes_r_db_data: CrtesRAssessmentData | None,
+    ) -> None:
+        """통합 전문 소견을 LLM으로 생성합니다.
+
+        검사 데이터와 대화 분석을 종합하여 전문적이고 자연스러운
+        통합 소견을 생성합니다.
+
+        Args:
+            request: 통합 보고서 생성 요청 (in-place 수정됨)
+            kprc_db_data: KPRC 검사 데이터
+            sdq_db_data: SDQ-A 검사 데이터
+            crtes_r_db_data: CRTES-R 검사 데이터
+        """
+        logger.info(
+            "[INTEGRATED_OPINION] 통합 전문 소견 생성 시작",
+            extra={"child_id": request.child_id, "child_name": request.child_name},
+        )
+
+        opinion_start = time.time()
+
+        try:
+            # 입력 데이터 구성
+            # KPRC 데이터
+            kprc_t_scores: dict[str, int | None] | None = None
+            kprc_risk_scales: list[str] | None = None
+            kprc_summary: str | None = None
+
+            if kprc_db_data is not None:
+                kprc_t_scores = kprc_db_data.t_scores
+                kprc_risk_scales = kprc_db_data.risk_scales
+
+            # KPRC 소견 추출 (attached_assessments에서)
+            if request.attached_assessments:
+                for assessment in request.attached_assessments:
+                    if assessment.assessmentType.startswith("KPRC") and assessment.summary:
+                        kprc_summary = assessment.summary.expertOpinion
+
+            # SDQ-A 데이터
+            sdq_strength_score: int | None = None
+            sdq_difficulty_score: int | None = None
+            sdq_summary_strength: str | None = None
+            sdq_summary_difficulty: str | None = None
+
+            if sdq_db_data is not None:
+                sdq_strength_score = sdq_db_data.strength_score
+                sdq_difficulty_score = sdq_db_data.difficulty_score
+
+            # SDQ-A 소견 추출 (attached_assessments에서)
+            if request.attached_assessments:
+                for assessment in request.attached_assessments:
+                    if assessment.assessmentType == "SDQ_A" and assessment.summary:
+                        sdq_summary_strength = assessment.summary.expertOpinion
+                        sdq_summary_difficulty = assessment.summary.expertOpinion
+
+            # CRTES-R 데이터
+            crtes_r_score: int | None = None
+            crtes_r_summary: str | None = None
+
+            if crtes_r_db_data is not None:
+                crtes_r_score = crtes_r_db_data.total_score
+
+            # CRTES-R 소견 추출 (attached_assessments에서)
+            if request.attached_assessments:
+                for assessment in request.attached_assessments:
+                    if assessment.assessmentType == "CRTES_R" and assessment.summary:
+                        crtes_r_summary = assessment.summary.expertOpinion
+
+            # 대화 분석 데이터
+            conversation_summary: str | None = None
+            emotional_keywords: list[str] = []
+            key_topics: list[str] = []
+
+            if request.conversationAnalysis:
+                # 전문가 분석이 있으면 사용, 없으면 요약 라인 결합
+                if request.conversationAnalysis.expertAnalysis:
+                    conversation_summary = request.conversationAnalysis.expertAnalysis
+                elif request.conversationAnalysis.summaryLines:
+                    conversation_summary = " ".join(request.conversationAnalysis.summaryLines)
+
+                if request.conversationAnalysis.emotionalKeywords:
+                    emotional_keywords = request.conversationAnalysis.emotionalKeywords
+
+                if request.conversationAnalysis.recommendedFocusAreas:
+                    key_topics = request.conversationAnalysis.recommendedFocusAreas
+                elif request.conversationAnalysis.keyObservations:
+                    key_topics = request.conversationAnalysis.keyObservations
+
+            # 바우처 정보
+            is_voucher_eligible = False
+            voucher_eligible_assessments: list[str] = []
+
+            if request.voucher_eligibility:
+                is_voucher_eligible = request.voucher_eligibility.is_eligible
+                voucher_eligible_assessments = request.voucher_eligibility.eligible_assessments
+
+            # IntegratedOpinionInput 생성
+            input_data = IntegratedOpinionInput(
+                child_name=request.child_name,
+                child_age=request.basic_info.childInfo.age if request.basic_info else None,
+                child_gender=request.basic_info.childInfo.gender if request.basic_info else None,
+                kprc_t_scores=kprc_t_scores,
+                kprc_risk_scales=kprc_risk_scales,
+                kprc_summary=kprc_summary,
+                sdq_strength_score=sdq_strength_score,
+                sdq_difficulty_score=sdq_difficulty_score,
+                sdq_summary_strength=sdq_summary_strength,
+                sdq_summary_difficulty=sdq_summary_difficulty,
+                crtes_r_score=crtes_r_score,
+                crtes_r_summary=crtes_r_summary,
+                conversation_summary=conversation_summary,
+                emotional_keywords=emotional_keywords,
+                key_topics=key_topics,
+                is_voucher_eligible=is_voucher_eligible,
+                voucher_eligible_assessments=voucher_eligible_assessments,
+            )
+
+            # LLM 통합 소견 생성
+            opinion = await self.integrated_opinion_generator.generate(input_data)
+
+            # request에 통합 소견 저장
+            request.integrated_opinion = opinion.full_text
+
+            opinion_duration = time.time() - opinion_start
+            logger.info(
+                "[INTEGRATED_OPINION] 통합 전문 소견 생성 완료",
+                extra={
+                    "child_id": request.child_id,
+                    "opinion_length": len(opinion.full_text),
+                    "duration": _format_duration(opinion_duration),
+                },
+            )
+
+        except Exception as e:
+            logger.error(
+                "[INTEGRATED_OPINION] 통합 전문 소견 생성 실패",
+                extra={"child_id": request.child_id, "error": str(e)},
+            )
+            # 실패 시에도 계속 진행 (integrated_opinion은 None으로 유지)
 
     def _calculate_combined_voucher_eligibility(
         self,
