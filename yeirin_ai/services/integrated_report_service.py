@@ -714,7 +714,11 @@ class IntegratedReportService:
                             },
                         )
 
-                        if strengths_score is not None and difficulties_score is not None:
+                        # 강점 또는 난점 점수가 하나라도 있으면 분리 표시
+                        # 없는 점수는 0으로 기본값 설정
+                        if strengths_score is not None or difficulties_score is not None:
+                            strengths_score = strengths_score if strengths_score is not None else 0
+                            difficulties_score = difficulties_score if difficulties_score is not None else 0
                             # 강점/난점 분리 소견 생성 (첫 줄에 점수 포함)
                             sdq_scores = SdqAScores(
                                 strengths_score=strengths_score,
@@ -775,18 +779,19 @@ class IntegratedReportService:
 
                             total_score = sdq_db_data.total_score
                             max_score = sdq_db_data.max_score or 50
-                            score_line = f"{total_score}/{max_score}점"
 
                             existing_lines = opinion.summary_lines if opinion.summary_lines else []
                             # LLM이 생성한 첫 줄(점수+이모지)을 건너뛰고 2-3번째 줄만 사용
                             opinion_lines = existing_lines[1:3] if len(existing_lines) >= 3 else []
 
+                            # 세부 점수 없이 총점만 있는 경우 - 적절한 형식으로 표시
+                            # 강점: -/10점, 난점: -/40점 (세부 점수 없음)
                             new_summary_lines = [
-                                score_line,
-                                opinion_lines[0] if len(opinion_lines) > 0 else "",
+                                "-/10점",
+                                opinion_lines[0] if len(opinion_lines) > 0 else f"(총점 {total_score}/{max_score}점 기준)",
                                 opinion_lines[1] if len(opinion_lines) > 1 else "",
-                                score_line,
-                                opinion_lines[0] if len(opinion_lines) > 0 else "",
+                                "-/40점",
+                                opinion_lines[0] if len(opinion_lines) > 0 else f"(총점 {total_score}/{max_score}점 기준)",
                                 opinion_lines[1] if len(opinion_lines) > 1 else "",
                             ]
 
