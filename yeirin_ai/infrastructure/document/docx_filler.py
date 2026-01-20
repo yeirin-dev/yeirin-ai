@@ -643,18 +643,87 @@ class CounselRequestDocxFiller:
                     content_parts.append("")
                 content_parts.append(analysis.expertAnalysis)
 
+        # 바우처 추천 대상 여부 결정 (KPRC 첫 줄에서 판단)
+        voucher_statement = self._get_voucher_statement(request)
+
         if content_parts:
-            self._set_cell_text_with_font(cell, "\n\n".join(content_parts), font_size=10)
+            main_text = "\n\n".join(content_parts)
+            self._fill_cell_with_bold_ending(cell, main_text, voucher_statement, font_size=10)
         else:
             # 기본 메시지
             default_text = (
                 f"{request.child_name} 아동에 대한 종합적인 심리 평가 결과, "
                 "전문 상담 서비스를 통한 정서적 지원이 권장됩니다."
             )
-            self._set_cell_text_with_font(cell, default_text, font_size=10)
+            self._fill_cell_with_bold_ending(cell, default_text, voucher_statement, font_size=10)
 
         for para in cell.paragraphs:
             para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+    def _get_voucher_statement(self, request: IntegratedReportRequest) -> str | None:
+        """KPRC 검사 결과에서 바우처 추천 대상 여부를 판단하여 문구를 반환합니다.
+
+        Args:
+            request: 통합 보고서 생성 요청
+
+        Returns:
+            바우처 추천 문구 또는 None (KPRC 데이터 없는 경우)
+        """
+        kprc = request.get_kprc_summary_for_doc()
+
+        if not kprc or not kprc.summaryLines or len(kprc.summaryLines) == 0:
+            return None
+
+        first_line = kprc.summaryLines[0]
+
+        # 첫 줄 내용으로 바우처 대상 여부 판단
+        # "바우처 추천 대상:" 으로 시작하면 대상
+        # "이 아동은 바우처 추천대상자는 아닙니다." 이면 비대상
+        if first_line.startswith("바우처 추천 대상:"):
+            return "이 아동은 바우처 추천 대상입니다."
+        elif "바우처 추천대상자는 아닙니다" in first_line:
+            return "이 아동은 바우처 추천 대상이 아닙니다."
+
+        return None
+
+    def _fill_cell_with_bold_ending(
+        self,
+        cell,
+        main_text: str,
+        bold_text: str | None,
+        font_size: int = 10,
+    ) -> None:
+        """셀에 텍스트를 설정하고 마지막 부분을 볼드체로 적용합니다.
+
+        Args:
+            cell: 대상 셀
+            main_text: 일반 텍스트 (앞부분)
+            bold_text: 볼드 텍스트 (마지막 부분, None이면 생략)
+            font_size: 폰트 크기
+        """
+        cell.text = ""
+        paragraph = cell.paragraphs[0] if cell.paragraphs else cell.add_paragraph()
+        paragraph.clear()
+
+        # Main text (normal)
+        main_run = paragraph.add_run(main_text)
+        main_run.font.name = NANUM_GOTHIC_FONT
+        main_run._element.rPr.rFonts.set(qn("w:eastAsia"), NANUM_GOTHIC_FONT)
+        main_run.font.size = Pt(font_size)
+
+        # Bold text (if provided)
+        if bold_text:
+            # 줄바꿈 추가 후 볼드 텍스트
+            newline_run = paragraph.add_run("\n\n")
+            newline_run.font.name = NANUM_GOTHIC_FONT
+            newline_run._element.rPr.rFonts.set(qn("w:eastAsia"), NANUM_GOTHIC_FONT)
+            newline_run.font.size = Pt(font_size)
+
+            bold_run = paragraph.add_run(bold_text)
+            bold_run.font.name = NANUM_GOTHIC_FONT
+            bold_run._element.rPr.rFonts.set(qn("w:eastAsia"), NANUM_GOTHIC_FONT)
+            bold_run.font.size = Pt(font_size)
+            bold_run.font.bold = True
 
     def _get_assessment_summary(self, request: IntegratedReportRequest, assessment_type: str):
         """특정 타입의 검사 요약을 가져옵니다."""
