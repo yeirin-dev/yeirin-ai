@@ -661,14 +661,25 @@ class CounselRequestDocxFiller:
             para.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
     def _get_voucher_statement(self, request: IntegratedReportRequest) -> str | None:
-        """KPRC 검사 결과에서 바우처 추천 대상 여부를 판단하여 문구를 반환합니다.
+        """통합 바우처 추천 대상 여부를 판단하여 문구를 반환합니다.
+
+        3개 검사(KPRC, SDQ-A, CRTES-R) 중 하나라도 기준 충족 시 추천 대상입니다.
 
         Args:
             request: 통합 보고서 생성 요청
 
         Returns:
-            바우처 추천 문구 또는 None (KPRC 데이터 없는 경우)
+            바우처 추천 문구 또는 None (검사 데이터 없는 경우)
         """
+        # 서비스 레이어에서 계산된 통합 바우처 판별 결과 사용
+        if request.voucher_eligibility is not None:
+            eligibility = request.voucher_eligibility
+            if eligibility.is_eligible:
+                return "이 아동은 바우처 추천 대상입니다."
+            else:
+                return "이 아동은 바우처 추천 대상이 아닙니다."
+
+        # Fallback: voucher_eligibility가 없는 경우 KPRC 첫 줄로 판단 (레거시 호환)
         kprc = request.get_kprc_summary_for_doc()
 
         if not kprc or not kprc.summaryLines or len(kprc.summaryLines) == 0:

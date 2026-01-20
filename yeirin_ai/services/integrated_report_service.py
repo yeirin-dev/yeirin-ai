@@ -15,6 +15,7 @@ from yeirin_ai.domain.integrated_report.models import (
     BaseAssessmentSummary,
     IntegratedReportRequest,
     IntegratedReportResult,
+    VoucherEligibilityResult,
 )
 from yeirin_ai.infrastructure.document import CounselRequestDocxFiller, DocxToPdfConverter
 from yeirin_ai.infrastructure.document.government_docx_filler import GovernmentDocxFiller
@@ -32,7 +33,12 @@ from yeirin_ai.infrastructure.llm.recommender_opinion_generator import (
     RecommenderOpinionGenerator,
 )
 from yeirin_ai.infrastructure.pdf import PDFMerger
-from yeirin_ai.services.assessment_data_service import AssessmentDataService
+from yeirin_ai.services.assessment_data_service import (
+    AssessmentDataService,
+    CrtesRAssessmentData,
+    KprcAssessmentData,
+    SdqAssessmentData,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -963,6 +969,111 @@ class IntegratedReportService:
             # 생성된 요약을 assessment에 할당 (항상 덮어쓰기)
             if generated_summary:
                 assessment.summary = generated_summary
+
+        # 통합 바우처 추천 대상 판별 (3개 검사 OR 조건)
+        voucher_eligibility = self._calculate_combined_voucher_eligibility(
+            kprc_db_data=kprc_db_data,
+            sdq_db_data=sdq_db_data,
+            crtes_r_db_data=crtes_r_db_data,
+        )
+        request.voucher_eligibility = voucher_eligibility
+
+        logger.info(
+            "[INTEGRATED_REPORT] 통합 바우처 추천 대상 판별 완료",
+            extra={
+                "child_id": request.child_id,
+                "is_eligible": voucher_eligibility.is_eligible,
+                "eligible_assessments": voucher_eligibility.eligible_assessments,
+            },
+        )
+
+    def _calculate_combined_voucher_eligibility(
+        self,
+        kprc_db_data: KprcAssessmentData | None,
+        sdq_db_data: SdqAssessmentData | None,
+        crtes_r_db_data: CrtesRAssessmentData | None,
+    ) -> VoucherEligibilityResult:
+        """통합 바우처 추천 대상 판별.
+
+        3개 검사(KPRC, SDQ-A, CRTES-R) 중 하나라도 기준 충족 시 추천 대상입니다.
+
+        바우처 기준 (OR 조건):
+        - KPRC: ERS ≤30T 또는 10개 척도 중 ≥65T (ICN, F 제외)
+        - SDQ-A: 강점 ≤4점 (level 2 이상) 또는 난점 ≥17점 (level 2 이상)
+        - CRTES-R: 총점 ≥23점 (중등도군 이상)
+
+        Args:
+            kprc_db_data: KPRC 검사 데이터
+            sdq_db_data: SDQ-A 검사 데이터
+            crtes_r_db_data: CRTES-R 검사 데이터
+
+        Returns:
+            통합 바우처 추천 대상 판별 결과
+        """
+        eligible_assessments: list[str] = []
+
+        # 1. KPRC 판별 (assessment_data_service에서 이미 계산됨)
+        kprc_eligible: bool | None = None
+        kprc_risk_scales: list[str] | None = None
+
+        if kprc_db_data is not None:
+            kprc_eligible = kprc_db_data.meets_voucher_criteria
+            kprc_risk_scales = kprc_db_data.risk_scales
+            if kprc_eligible:
+                eligible_assessments.append("KPRC")
+
+        # 2. SDQ-A 판별
+        # 기준: 강점 ≤4점 (level 2 이상) OR 난점 ≥17점 (level 2 이상)
+        sdq_a_eligible: bool | None = None
+        sdq_a_reason: str | None = None
+
+        if sdq_db_data is not None:
+            strength_score = sdq_db_data.strength_score
+            difficulty_score = sdq_db_data.difficulty_score
+
+            # 강점이 낮을수록 위험 (≤4점이 level 2 이상)
+            strength_risk = strength_score is not None and strength_score <= 4
+            # 난점이 높을수록 위험 (≥17점이 level 2 이상)
+            difficulty_risk = difficulty_score is not None and difficulty_score >= 17
+
+            if strength_risk or difficulty_risk:
+                sdq_a_eligible = True
+                reasons = []
+                if strength_risk:
+                    reasons.append(f"강점 {strength_score}점 (≤4)")
+                if difficulty_risk:
+                    reasons.append(f"난점 {difficulty_score}점 (≥17)")
+                sdq_a_reason = ", ".join(reasons)
+                eligible_assessments.append("SDQ_A")
+            else:
+                sdq_a_eligible = False
+
+        # 3. CRTES-R 판별
+        # 기준: 총점 ≥23점 (중등도군 이상)
+        crtes_r_eligible: bool | None = None
+        crtes_r_score: int | None = None
+
+        if crtes_r_db_data is not None:
+            crtes_r_score = crtes_r_db_data.total_score
+            if crtes_r_score is not None and crtes_r_score >= 23:
+                crtes_r_eligible = True
+                eligible_assessments.append("CRTES_R")
+            else:
+                crtes_r_eligible = False
+
+        # 최종 판별 (OR 조건: 하나라도 충족하면 추천 대상)
+        is_eligible = len(eligible_assessments) > 0
+
+        return VoucherEligibilityResult(
+            is_eligible=is_eligible,
+            eligible_assessments=eligible_assessments,
+            kprc_eligible=kprc_eligible,
+            kprc_risk_scales=kprc_risk_scales,
+            sdq_a_eligible=sdq_a_eligible,
+            sdq_a_reason=sdq_a_reason,
+            crtes_r_eligible=crtes_r_eligible,
+            crtes_r_score=crtes_r_score,
+        )
 
 
 # =============================================================================

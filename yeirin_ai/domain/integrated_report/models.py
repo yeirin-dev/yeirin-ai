@@ -371,6 +371,29 @@ class ConversationAnalysis(BaseModel):
     messageCount: int | None = Field(None, description="대화 메시지 수")
 
 
+class VoucherEligibilityResult(BaseModel):
+    """바우처 추천 대상 통합 판별 결과.
+
+    3개 검사(KPRC, SDQ-A, CRTES-R) 중 하나라도 기준 충족 시 추천 대상입니다.
+
+    바우처 기준:
+    - KPRC: ERS ≤30T 또는 10개 척도 중 ≥65T (ICN, F 제외)
+    - SDQ-A: 강점 ≤4점 (level 2) 또는 난점 ≥17점 (level 2)
+    - CRTES-R: 총점 ≥23점 (중등도군 이상)
+    """
+
+    is_eligible: bool = Field(..., description="바우처 추천 대상 여부 (OR 조건)")
+    eligible_assessments: list[str] = Field(
+        default_factory=list, description="기준 충족 검사 목록 (KPRC, SDQ_A, CRTES_R)"
+    )
+    kprc_eligible: bool | None = Field(None, description="KPRC 기준 충족 여부")
+    kprc_risk_scales: list[str] | None = Field(None, description="KPRC 위험 척도 목록")
+    sdq_a_eligible: bool | None = Field(None, description="SDQ-A 기준 충족 여부")
+    sdq_a_reason: str | None = Field(None, description="SDQ-A 충족 사유 (강점/난점)")
+    crtes_r_eligible: bool | None = Field(None, description="CRTES-R 기준 충족 여부")
+    crtes_r_score: int | None = Field(None, description="CRTES-R 총점")
+
+
 class IntegratedReportRequest(BaseModel):
     """통합 보고서 생성 요청.
 
@@ -412,6 +435,11 @@ class IntegratedReportRequest(BaseModel):
     # Soul-E AI 대화 분석 결과 (새 문서 포맷)
     conversationAnalysis: ConversationAnalysis | None = Field(
         None, description="AI 대화 분석 결과 (섹션 4.2)"
+    )
+
+    # 바우처 추천 대상 통합 판별 결과 (서비스 레이어에서 설정)
+    voucher_eligibility: VoucherEligibilityResult | None = Field(
+        None, description="바우처 추천 대상 통합 판별 결과 (KPRC, SDQ-A, CRTES-R 통합)"
     )
 
     def get_assessment_pdfs_s3_keys(self) -> list[tuple[str, str]]:
