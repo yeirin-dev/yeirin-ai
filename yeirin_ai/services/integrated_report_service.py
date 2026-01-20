@@ -734,8 +734,11 @@ class IntegratedReportService:
                             difficulty_score_line = f"{difficulties_score}/40점"
 
                             existing_lines = opinion.summary_lines if opinion.summary_lines else []
-                            strength_opinion_lines = existing_lines[:3] if len(existing_lines) >= 3 else existing_lines
-                            difficulty_opinion_lines = existing_lines[3:6] if len(existing_lines) >= 6 else []
+                            # LLM이 생성한 첫 줄(점수+이모지)을 건너뛰고 2-3번째 줄만 사용
+                            # 강점: [0]=점수줄(스킵), [1]=해석1, [2]=해석2
+                            # 난점: [3]=점수줄(스킵), [4]=해석1, [5]=해석2
+                            strength_opinion_lines = existing_lines[1:3] if len(existing_lines) >= 3 else []
+                            difficulty_opinion_lines = existing_lines[4:6] if len(existing_lines) >= 6 else []
 
                             new_summary_lines = [
                                 strength_score_line,
@@ -775,14 +778,16 @@ class IntegratedReportService:
                             score_line = f"{total_score}/{max_score}점"
 
                             existing_lines = opinion.summary_lines if opinion.summary_lines else []
+                            # LLM이 생성한 첫 줄(점수+이모지)을 건너뛰고 2-3번째 줄만 사용
+                            opinion_lines = existing_lines[1:3] if len(existing_lines) >= 3 else []
 
                             new_summary_lines = [
                                 score_line,
-                                existing_lines[0] if len(existing_lines) > 0 else "",
-                                existing_lines[1] if len(existing_lines) > 1 else "",
+                                opinion_lines[0] if len(opinion_lines) > 0 else "",
+                                opinion_lines[1] if len(opinion_lines) > 1 else "",
                                 score_line,
-                                existing_lines[0] if len(existing_lines) > 0 else "",
-                                existing_lines[1] if len(existing_lines) > 1 else "",
+                                opinion_lines[0] if len(opinion_lines) > 0 else "",
+                                opinion_lines[1] if len(opinion_lines) > 1 else "",
                             ]
 
                             generated_summary = BaseAssessmentSummary(
@@ -871,11 +876,13 @@ class IntegratedReportService:
 
                         score_line = f"{total_score}/115점"
                         existing_lines = opinion.summary_lines if opinion.summary_lines else []
+                        # LLM이 생성한 첫 줄(점수+이모지)을 건너뛰고 2-3번째 줄만 사용
+                        opinion_lines = existing_lines[1:3] if len(existing_lines) >= 3 else []
 
                         new_summary_lines = [
                             score_line,
-                            existing_lines[0] if len(existing_lines) > 0 else "",
-                            existing_lines[1] if len(existing_lines) > 1 else "",
+                            opinion_lines[0] if len(opinion_lines) > 0 else "",
+                            opinion_lines[1] if len(opinion_lines) > 1 else "",
                         ]
 
                         generated_summary = BaseAssessmentSummary(
