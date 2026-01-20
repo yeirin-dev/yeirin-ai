@@ -442,6 +442,11 @@ class IntegratedReportRequest(BaseModel):
         None, description="바우처 추천 대상 통합 판별 결과 (KPRC, SDQ-A, CRTES-R 통합)"
     )
 
+    # LLM 생성 통합 전문 소견 (서비스 레이어에서 설정)
+    integrated_opinion: str | None = Field(
+        None, description="LLM 생성 통합 전문 소견 (섹션 3: 예이린 AI 기반 통합 전문 소견)"
+    )
+
     def get_assessment_pdfs_s3_keys(self) -> list[tuple[str, str]]:
         """모든 검사 결과 PDF의 S3 키를 반환합니다.
 
