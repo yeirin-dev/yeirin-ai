@@ -775,8 +775,51 @@ class IntegratedReportService:
                                 "difficulties_score": f"{difficulties_score}/40",
                             },
                         )
+                    elif assessment.totalScore is not None:
+                        # scaleScores 없지만 totalScore 있는 경우 - 간소화 요약 생성
+                        logger.info(
+                            "[INTEGRATED_REPORT] SDQ-A scaleScores 없음, totalScore로 간소화 요약 생성",
+                            extra={"totalScore": assessment.totalScore},
+                        )
+                        opinion = await self.assessment_opinion_generator.generate_sdq_a_summary_simple(
+                            total_score=assessment.totalScore,
+                            max_score=assessment.maxScore,
+                            overall_level=assessment.overallLevel,
+                            child_context=assessment_child_context,
+                        )
+
+                        # 간소화 요약은 3줄 - 양쪽 셀에 동일하게 표시
+                        # 첫 줄에 총점 표시
+                        total_score = assessment.totalScore
+                        max_score = assessment.maxScore or 50
+                        score_line = f"{total_score}/{max_score}점"
+
+                        existing_lines = opinion.summary_lines if opinion.summary_lines else []
+
+                        # 강점/난점 양쪽에 동일한 총점 기반 소견 표시
+                        new_summary_lines = [
+                            score_line,  # 강점 1줄: 총점
+                            existing_lines[0] if len(existing_lines) > 0 else "",  # 강점 2줄
+                            existing_lines[1] if len(existing_lines) > 1 else "",  # 강점 3줄
+                            score_line,  # 난점 1줄: 총점 (동일)
+                            existing_lines[0] if len(existing_lines) > 0 else "",  # 난점 2줄
+                            existing_lines[1] if len(existing_lines) > 1 else "",  # 난점 3줄
+                        ]
+
+                        generated_summary = BaseAssessmentSummary(
+                            summaryLines=new_summary_lines,
+                            expertOpinion=opinion.expert_opinion,
+                            keyFindings=opinion.key_findings,
+                            recommendations=opinion.recommendations,
+                            confidenceScore=opinion.confidence_score,
+                        )
+
+                        logger.info(
+                            "[INTEGRATED_REPORT] SDQ-A 간소화 요약 생성 완료",
+                            extra={"total_score": f"{total_score}/{max_score}"},
+                        )
                     else:
-                        # scaleScores 없는 경우 기본 메시지
+                        # scaleScores도 totalScore도 없는 경우 기본 메시지
                         generated_summary = BaseAssessmentSummary(
                             summaryLines=[
                                 "검사 결과가 없습니다.",
@@ -799,7 +842,7 @@ class IntegratedReportService:
                         extra={
                             "duration": _format_duration(opinion_duration),
                             "summary_lines_count": len(generated_summary.summaryLines) if generated_summary else 0,
-                            "method": "scale_scores" if has_scale_scores else "no_data",
+                            "method": "scale_scores" if has_scale_scores else ("total_score" if assessment.totalScore is not None else "no_data"),
                         },
                     )
                 except Exception as e:
