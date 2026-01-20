@@ -653,11 +653,12 @@ class IntegratedReportService:
     async def _generate_missing_assessment_summaries(
         self, request: IntegratedReportRequest
     ) -> None:
-        """SDQ-A/CRTES-R/KPRC 검사 결과의 누락된 요약을 자동 생성합니다.
+        """모든 검사 결과의 요약을 DB 데이터 기반으로 즉시 생성합니다.
 
-        summary가 없는 검사에 대해 LLM을 사용하여 요약을 생성합니다:
-        - SDQ-A/CRTES-R: totalScore, maxScore, overallLevel 기반
-        - KPRC: T점수 데이터 기반 (kprcTScores)
+        레거시 summary 필드를 참조하지 않고, 항상 새로 생성합니다.
+        - KPRC: 첫 줄 바우처 조건 + T점수 기반 소견
+        - CRTES-R: 첫 줄 총점/115 + 점수 기반 소견
+        - SDQ-A: 강점(X/10) + 난점(X/40) 분리
 
         Args:
             request: 통합 보고서 생성 요청 (in-place 수정됨)
@@ -676,8 +677,7 @@ class IntegratedReportService:
             assessment_type = assessment.assessmentType
             generated_summary: BaseAssessmentSummary | None = None
 
-            # SDQ-A: scaleScores가 있으면 재생성 (강점/난점 분리 점수 표시를 위해)
-            # 기존 summary가 "총점 X/50점" 형식일 수 있으므로, scaleScores가 있으면 항상 재생성
+            # SDQ-A 검사 요약 생성 (강점/난점 분리, 첫 줄에 점수 표시)
             if assessment_type == "SDQ_A":
                 # sdqScaleScores가 있으면 강점/난점 분리 소견 생성
                 has_scale_scores = (
@@ -688,41 +688,34 @@ class IntegratedReportService:
                     and assessment.sdqScaleScores.difficulties.score is not None
                 )
 
-                # scaleScores가 없고 기존 summary가 있으면 건너뜀
-                if not has_scale_scores and assessment.summary is not None:
-                    continue
-            else:
-                # SDQ-A 외 검사: summary가 이미 있으면 건너뜀
-                if assessment.summary is not None:
-                    continue
-
-            # SDQ-A 검사 요약 생성
-            if assessment_type == "SDQ_A":
-                # has_scale_scores는 위에서 이미 계산됨
+                # 로깅용 점수 추출
+                strengths_log_score = None
+                difficulties_log_score = None
+                if (
+                    has_scale_scores
+                    and assessment.sdqScaleScores is not None
+                    and assessment.sdqScaleScores.strengths is not None
+                    and assessment.sdqScaleScores.difficulties is not None
+                ):
+                    strengths_log_score = assessment.sdqScaleScores.strengths.score
+                    difficulties_log_score = assessment.sdqScaleScores.difficulties.score
 
                 logger.info(
-                    "[INTEGRATED_REPORT] SDQ-A 요약 자동 생성 시작",
+                    "[INTEGRATED_REPORT] SDQ-A 요약 생성 시작 (항상 새로 생성)",
                     extra={
                         "totalScore": assessment.totalScore,
                         "maxScore": assessment.maxScore,
                         "overallLevel": assessment.overallLevel,
                         "hasScaleScores": has_scale_scores,
-                        "strengthsScore": (
-                            assessment.sdqScaleScores.strengths.score
-                            if has_scale_scores else None
-                        ),
-                        "difficultiesScore": (
-                            assessment.sdqScaleScores.difficulties.score
-                            if has_scale_scores else None
-                        ),
+                        "strengthsScore": strengths_log_score,
+                        "difficultiesScore": difficulties_log_score,
                     },
                 )
                 try:
                     opinion_start = time.time()
 
                     if has_scale_scores:
-                        # 강점/난점 분리 소견 생성 (신규 방식)
-                        # type: ignore를 사용하지 않고 안전하게 값 추출
+                        # 강점/난점 분리 소견 생성 (첫 줄에 점수 포함)
                         scale_scores = assessment.sdqScaleScores
                         assert scale_scores is not None
                         assert scale_scores.strengths is not None
@@ -730,10 +723,13 @@ class IntegratedReportService:
                         assert scale_scores.strengths.score is not None
                         assert scale_scores.difficulties.score is not None
 
+                        strengths_score = scale_scores.strengths.score
+                        difficulties_score = scale_scores.difficulties.score
+
                         sdq_scores = SdqAScores(
-                            strengths_score=scale_scores.strengths.score,
+                            strengths_score=strengths_score,
                             strengths_level=scale_scores.strengths.level or 1,
-                            difficulties_score=scale_scores.difficulties.score,
+                            difficulties_score=difficulties_score,
                             difficulties_level=scale_scores.difficulties.level or 1,
                             strengths_level_description=scale_scores.strengths.levelDescription,
                             difficulties_level_description=scale_scores.difficulties.levelDescription,
@@ -742,53 +738,95 @@ class IntegratedReportService:
                             scores=sdq_scores,
                             child_context=assessment_child_context,
                         )
+
+                        # 첫 줄에 점수 추가: 강점 "X/10점", 난점 "X/40점"
+                        # 기존 opinion.summary_lines는 6줄 (강점 3줄 + 난점 3줄)
+                        # 새 포맷: 강점 첫줄 "X/10점" + 소견 2줄, 난점 첫줄 "X/40점" + 소견 2줄
+                        strength_score_line = f"{strengths_score}/10점"
+                        difficulty_score_line = f"{difficulties_score}/40점"
+
+                        # 기존 6줄에서 강점/난점 소견 추출
+                        existing_lines = opinion.summary_lines if opinion.summary_lines else []
+                        strength_opinion_lines = existing_lines[:3] if len(existing_lines) >= 3 else existing_lines
+                        difficulty_opinion_lines = existing_lines[3:6] if len(existing_lines) >= 6 else []
+
+                        # 새 포맷으로 재구성: 첫 줄에 점수, 나머지 2줄에 소견
+                        new_summary_lines = [
+                            strength_score_line,  # 강점 1줄: 점수
+                            strength_opinion_lines[0] if len(strength_opinion_lines) > 0 else "",  # 강점 2줄
+                            strength_opinion_lines[1] if len(strength_opinion_lines) > 1 else "",  # 강점 3줄
+                            difficulty_score_line,  # 난점 1줄: 점수
+                            difficulty_opinion_lines[0] if len(difficulty_opinion_lines) > 0 else "",  # 난점 2줄
+                            difficulty_opinion_lines[1] if len(difficulty_opinion_lines) > 1 else "",  # 난점 3줄
+                        ]
+
+                        generated_summary = BaseAssessmentSummary(
+                            summaryLines=new_summary_lines,
+                            expertOpinion=opinion.expert_opinion,
+                            keyFindings=opinion.key_findings,
+                            recommendations=opinion.recommendations,
+                            confidenceScore=opinion.confidence_score,
+                        )
+
                         logger.info(
                             "[INTEGRATED_REPORT] SDQ-A 강점/난점 분리 소견 생성 완료",
                             extra={
-                                "strengths_score": f"{sdq_scores.strengths_score}/10",
-                                "difficulties_score": f"{sdq_scores.difficulties_score}/40",
+                                "strengths_score": f"{strengths_score}/10",
+                                "difficulties_score": f"{difficulties_score}/40",
                             },
                         )
                     else:
-                        # 총점 기반 소견 생성 (레거시 방식)
-                        opinion = await self.assessment_opinion_generator.generate_sdq_a_summary_simple(
-                            total_score=assessment.totalScore,
-                            max_score=assessment.maxScore,
-                            overall_level=assessment.overallLevel,
-                            child_context=assessment_child_context,
+                        # scaleScores 없는 경우 기본 메시지
+                        generated_summary = BaseAssessmentSummary(
+                            summaryLines=[
+                                "검사 결과가 없습니다.",
+                                "",
+                                "",
+                                "검사 결과가 없습니다.",
+                                "",
+                                "",
+                            ],
+                            expertOpinion="",
+                            keyFindings=[],
+                            recommendations=[],
+                            confidenceScore=0.0,
                         )
 
                     opinion_duration = time.time() - opinion_start
 
-                    # SDQ-A는 6줄 필요: 강점 3줄 + 난점 3줄 (docx_filler에서 분리 사용)
-                    # opinion.summary_lines에 6줄이 생성됨
-                    generated_summary = BaseAssessmentSummary(
-                        summaryLines=opinion.summary_lines if opinion.summary_lines else [],
-                        expertOpinion=opinion.expert_opinion,
-                        keyFindings=opinion.key_findings,
-                        recommendations=opinion.recommendations,
-                        confidenceScore=opinion.confidence_score,
-                    )
-
                     logger.info(
-                        "[INTEGRATED_REPORT] SDQ-A 요약 자동 생성 완료",
+                        "[INTEGRATED_REPORT] SDQ-A 요약 생성 완료",
                         extra={
                             "duration": _format_duration(opinion_duration),
-                            "confidence": opinion.confidence_score,
-                            "summary_lines_count": len(opinion.summary_lines),
-                            "method": "scale_scores" if has_scale_scores else "total_score",
+                            "summary_lines_count": len(generated_summary.summaryLines) if generated_summary else 0,
+                            "method": "scale_scores" if has_scale_scores else "no_data",
                         },
                     )
                 except Exception as e:
                     logger.warning(
-                        "[INTEGRATED_REPORT] SDQ-A 요약 자동 생성 실패",
+                        "[INTEGRATED_REPORT] SDQ-A 요약 생성 실패",
                         extra={"error": str(e)},
                     )
+                    # 실패 시 기본 메시지
+                    generated_summary = BaseAssessmentSummary(
+                        summaryLines=[
+                            "검사 결과가 없습니다.",
+                            "",
+                            "",
+                            "검사 결과가 없습니다.",
+                            "",
+                            "",
+                        ],
+                        expertOpinion="",
+                        keyFindings=[],
+                        recommendations=[],
+                        confidenceScore=0.0,
+                    )
 
-            # CRTES-R 검사 요약 생성
+            # CRTES-R 검사 요약 생성 (첫 줄에 총점 표시)
             elif assessment_type == "CRTES_R":
                 logger.info(
-                    "[INTEGRATED_REPORT] CRTES-R 요약 자동 생성 시작",
+                    "[INTEGRATED_REPORT] CRTES-R 요약 생성 시작 (항상 새로 생성)",
                     extra={
                         "totalScore": assessment.totalScore,
                         "maxScore": assessment.maxScore,
@@ -797,43 +835,81 @@ class IntegratedReportService:
                 )
                 try:
                     opinion_start = time.time()
-                    opinion = await self.assessment_opinion_generator.generate_crtes_r_summary_simple(
-                        total_score=assessment.totalScore,
-                        max_score=assessment.maxScore,
-                        overall_level=assessment.overallLevel,
-                        child_context=assessment_child_context,
-                    )
-                    opinion_duration = time.time() - opinion_start
 
-                    # CRTES-R은 3줄 요약 사용
-                    generated_summary = BaseAssessmentSummary(
-                        summaryLines=opinion.summary_lines if opinion.summary_lines else [],
-                        expertOpinion=opinion.expert_opinion,
-                        keyFindings=opinion.key_findings,
-                        recommendations=opinion.recommendations,
-                        confidenceScore=opinion.confidence_score,
-                    )
+                    if assessment.totalScore is not None:
+                        opinion = await self.assessment_opinion_generator.generate_crtes_r_summary_simple(
+                            total_score=assessment.totalScore,
+                            max_score=assessment.maxScore,
+                            overall_level=assessment.overallLevel,
+                            child_context=assessment_child_context,
+                        )
+                        opinion_duration = time.time() - opinion_start
 
-                    logger.info(
-                        "[INTEGRATED_REPORT] CRTES-R 요약 자동 생성 완료",
-                        extra={
-                            "duration": _format_duration(opinion_duration),
-                            "confidence": opinion.confidence_score,
-                            "summary_lines_count": len(opinion.summary_lines),
-                        },
-                    )
+                        # 첫 줄에 총점 추가: "XX/115점"
+                        total_score = assessment.totalScore
+                        score_line = f"{total_score}/115점"
+
+                        existing_lines = opinion.summary_lines if opinion.summary_lines else []
+
+                        # 새 포맷: 첫 줄 총점 + 소견 2줄
+                        new_summary_lines = [
+                            score_line,
+                            existing_lines[0] if len(existing_lines) > 0 else "",
+                            existing_lines[1] if len(existing_lines) > 1 else "",
+                        ]
+
+                        generated_summary = BaseAssessmentSummary(
+                            summaryLines=new_summary_lines,
+                            expertOpinion=opinion.expert_opinion,
+                            keyFindings=opinion.key_findings,
+                            recommendations=opinion.recommendations,
+                            confidenceScore=opinion.confidence_score,
+                        )
+
+                        logger.info(
+                            "[INTEGRATED_REPORT] CRTES-R 요약 생성 완료",
+                            extra={
+                                "duration": _format_duration(opinion_duration),
+                                "confidence": opinion.confidence_score,
+                                "total_score": f"{total_score}/115",
+                            },
+                        )
+                    else:
+                        # totalScore 없는 경우
+                        generated_summary = BaseAssessmentSummary(
+                            summaryLines=["검사 결과가 없습니다.", "", ""],
+                            expertOpinion="",
+                            keyFindings=[],
+                            recommendations=[],
+                            confidenceScore=0.0,
+                        )
+
                 except Exception as e:
                     logger.warning(
-                        "[INTEGRATED_REPORT] CRTES-R 요약 자동 생성 실패",
+                        "[INTEGRATED_REPORT] CRTES-R 요약 생성 실패",
                         extra={"error": str(e)},
                     )
+                    generated_summary = BaseAssessmentSummary(
+                        summaryLines=["검사 결과가 없습니다.", "", ""],
+                        expertOpinion="",
+                        keyFindings=[],
+                        recommendations=[],
+                        confidenceScore=0.0,
+                    )
 
-            # KPRC 검사 요약 생성 (T점수 기반) - 자가보고형/교사평정형 모두 지원
+            # KPRC 검사 요약 생성 (첫 줄에 바우처 조건, T점수 기반)
             elif assessment_type.startswith("KPRC"):
-                # T점수 데이터가 있는 경우에만 생성
+                logger.info(
+                    "[INTEGRATED_REPORT] KPRC 요약 생성 시작 (항상 새로 생성)",
+                    extra={
+                        "assessment_type": assessment_type,
+                        "has_t_scores": assessment.kprcTScores is not None,
+                    },
+                )
+
                 if assessment.kprcTScores and _has_any_kprc_t_score(assessment.kprcTScores):
                     logger.info(
-                        "[INTEGRATED_REPORT] KPRC 요약 자동 생성 시작",
+                        "[INTEGRATED_REPORT] KPRC T점수 데이터 있음",
                         extra={
                             "ers_t_score": assessment.kprcTScores.ers_t_score,
                             "anx_t_score": assessment.kprcTScores.anx_t_score,
@@ -860,15 +936,16 @@ class IntegratedReportService:
                             psy_t_score=assessment.kprcTScores.psy_t_score,
                         )
 
+                        # generate_kprc_summary는 이미 첫 줄에 바우처 조건을 포함함
                         opinion = await self.assessment_opinion_generator.generate_kprc_summary(
                             t_scores=t_scores_data,
                             child_context=assessment_child_context,
                         )
                         opinion_duration = time.time() - opinion_start
 
-                        # KPRC은 3줄 요약 사용
+                        # KPRC는 3줄 요약 (첫 줄: 바우처 조건, 2-3줄: T점수 소견)
                         generated_summary = BaseAssessmentSummary(
-                            summaryLines=opinion.summary_lines if opinion.summary_lines else [],
+                            summaryLines=opinion.summary_lines[:3] if opinion.summary_lines else [],
                             expertOpinion=opinion.expert_opinion,
                             keyFindings=opinion.key_findings,
                             recommendations=opinion.recommendations,
@@ -876,25 +953,40 @@ class IntegratedReportService:
                         )
 
                         logger.info(
-                            "[INTEGRATED_REPORT] KPRC 요약 자동 생성 완료",
+                            "[INTEGRATED_REPORT] KPRC 요약 생성 완료",
                             extra={
                                 "duration": _format_duration(opinion_duration),
                                 "confidence": opinion.confidence_score,
-                                "summary_lines_count": len(opinion.summary_lines),
+                                "summary_lines_count": len(opinion.summary_lines) if opinion.summary_lines else 0,
+                                "meets_voucher": t_scores_data.meets_voucher_criteria(),
                             },
                         )
                     except Exception as e:
                         logger.warning(
-                            "[INTEGRATED_REPORT] KPRC 요약 자동 생성 실패",
+                            "[INTEGRATED_REPORT] KPRC 요약 생성 실패",
                             extra={"error": str(e)},
+                        )
+                        generated_summary = BaseAssessmentSummary(
+                            summaryLines=["검사 결과가 없습니다.", "", ""],
+                            expertOpinion="",
+                            keyFindings=[],
+                            recommendations=[],
+                            confidenceScore=0.0,
                         )
                 else:
                     logger.info(
-                        "[INTEGRATED_REPORT] KPRC T점수 데이터 없음 - 요약 생성 건너뜀",
+                        "[INTEGRATED_REPORT] KPRC T점수 데이터 없음",
                         extra={"assessment_type": assessment_type},
                     )
+                    generated_summary = BaseAssessmentSummary(
+                        summaryLines=["검사 결과가 없습니다.", "", ""],
+                        expertOpinion="",
+                        keyFindings=[],
+                        recommendations=[],
+                        confidenceScore=0.0,
+                    )
 
-            # 생성된 요약을 assessment에 할당
+            # 생성된 요약을 assessment에 할당 (항상 덮어쓰기)
             if generated_summary:
                 assessment.summary = generated_summary
 

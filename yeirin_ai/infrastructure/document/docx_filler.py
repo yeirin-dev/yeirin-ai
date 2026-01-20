@@ -449,28 +449,12 @@ class CounselRequestDocxFiller:
         # 5) 통합 AI 소견 (Row 11)
         self._fill_integrated_opinion_section(table, request)
 
-    # KPRC 척도명 → 한국어 매핑
-    KPRC_SCALE_NAME_MAP: dict[str, str] = {
-        "ERS": "자아탄력성",
-        "ICN": "비일관성",
-        "F": "비전형",
-        "VDL": "자기보호",
-        "PDL": "타인보호",
-        "ANX": "불안",
-        "DEP": "우울",
-        "SOM": "신체화",
-        "DLQ": "비행",
-        "HPR": "과잉행동",
-        "FAM": "가족관계",
-        "SOC": "사회관계",
-        "PSY": "정신증",
-    }
-
     def _fill_kprc_section(self, table, request: IntegratedReportRequest) -> None:
         """Row 2: KPRC 검사 소견을 채웁니다.
 
-        바우처 기준 충족 시 첫줄에 위험 척도와 T점수를 표시합니다.
-        예: "바우처 기준 충족: 자아탄력성(ERS) 28T, 불안(ANX) 72T"
+        summaryLines 포맷 (3줄):
+        - 1줄: 바우처 조건 ("바우처 추천 대상: ANX 72T" 또는 "이 아동은 바우처 추천대상자는 아닙니다.")
+        - 2-3줄: T점수 기반 전문 소견 (bullet point)
         """
         if len(table.rows) <= 2:
             return
@@ -478,20 +462,16 @@ class CounselRequestDocxFiller:
         cell = table.rows[2].cells[0]
         kprc = request.get_kprc_summary_for_doc()
 
-        # KPRC 검사 결과에서 T점수 및 바우처 기준 정보 가져오기
-        kprc_assessment = self._get_kprc_assessment(request)
-        voucher_line = self._build_kprc_voucher_line(kprc_assessment)
-
-        if kprc and kprc.summaryLines:
+        if kprc and kprc.summaryLines and len(kprc.summaryLines) >= 1:
             content_lines: list[str] = []
 
-            # 바우처 기준 충족 시 첫줄에 T점수 정보 추가
-            if voucher_line:
-                content_lines.append(voucher_line)
+            # 첫 줄: 바우처 조건 라인 (bullet 없음)
+            content_lines.append(kprc.summaryLines[0])
 
-            # 3줄 요약 표시 (새 포맷)
-            for line in kprc.summaryLines[:3]:
-                content_lines.append(f"• {line}")
+            # 2-3줄: 전문 소견 (bullet 포함)
+            for line in kprc.summaryLines[1:3]:
+                if line:
+                    content_lines.append(f"• {line}")
 
             content = "\n".join(content_lines)
             self._set_cell_text_with_font(cell, content, font_size=10)
@@ -501,83 +481,31 @@ class CounselRequestDocxFiller:
         for para in cell.paragraphs:
             para.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
-    def _get_kprc_assessment(self, request: IntegratedReportRequest):
-        """KPRC 검사 결과를 가져옵니다."""
-        if not request.attached_assessments:
-            return None
-
-        for assessment in request.attached_assessments:
-            # KPRC 자가보고형(KPRC_CO_SG_E), 교사평정형(KPRC_CO_TG) 등 모든 KPRC 유형 지원
-            if assessment.assessmentType.startswith("KPRC"):
-                return assessment
-
-        return None
-
-    def _build_kprc_voucher_line(self, kprc_assessment) -> str | None:
-        """KPRC 바우처 기준 충족 시 첫줄 텍스트를 생성합니다.
-
-        예: "바우처 기준 충족: 자아탄력성(ERS) 28T, 불안(ANX) 72T"
-        """
-        if not kprc_assessment:
-            return None
-
-        voucher_criteria = kprc_assessment.voucherCriteria
-        t_scores = kprc_assessment.kprcTScores
-
-        if not voucher_criteria or not voucher_criteria.meets_criteria:
-            return None
-
-        if not t_scores or not voucher_criteria.risk_scales:
-            return None
-
-        # 위험 척도별 T점수 수집
-        risk_score_parts: list[str] = []
-        for scale_name in voucher_criteria.risk_scales:
-            korean_name = self.KPRC_SCALE_NAME_MAP.get(scale_name, scale_name)
-            t_score = self._get_t_score_by_scale_name(t_scores, scale_name)
-
-            if t_score is not None:
-                risk_score_parts.append(f"{korean_name}({scale_name}) {t_score}T")
-
-        if not risk_score_parts:
-            return None
-
-        return f"바우처 기준 충족: {', '.join(risk_score_parts)}"
-
-    def _get_t_score_by_scale_name(self, t_scores, scale_name: str) -> int | None:
-        """척도명으로 T점수를 가져옵니다."""
-        score_field_map = {
-            "ERS": "ers_t_score",
-            "ICN": "icn_t_score",
-            "F": "f_t_score",
-            "VDL": "vdl_t_score",
-            "PDL": "pdl_t_score",
-            "ANX": "anx_t_score",
-            "DEP": "dep_t_score",
-            "SOM": "som_t_score",
-            "DLQ": "dlq_t_score",
-            "HPR": "hpr_t_score",
-            "FAM": "fam_t_score",
-            "SOC": "soc_t_score",
-            "PSY": "psy_t_score",
-        }
-
-        field_name = score_field_map.get(scale_name)
-        if not field_name:
-            return None
-
-        return getattr(t_scores, field_name, None)
-
     def _fill_crtes_r_section(self, table, request: IntegratedReportRequest) -> None:
-        """Row 4: CRTES-R 검사 소견을 채웁니다."""
+        """Row 4: CRTES-R 검사 소견을 채웁니다.
+
+        summaryLines 포맷 (3줄):
+        - 1줄: 총점 "X/115점" (bullet 없음)
+        - 2-3줄: 점수 기반 전문 소견 (bullet 포함)
+        """
         if len(table.rows) <= 4:
             return
 
         cell = table.rows[4].cells[0]
         crtes_r = self._get_assessment_summary(request, "CRTES_R")
 
-        if crtes_r and crtes_r.summaryLines:
-            content = "\n".join(f"• {line}" for line in crtes_r.summaryLines[:3])
+        if crtes_r and crtes_r.summaryLines and len(crtes_r.summaryLines) >= 1:
+            content_lines: list[str] = []
+
+            # 첫 줄: 총점 라인 (bullet 없음)
+            content_lines.append(crtes_r.summaryLines[0])
+
+            # 2-3줄: 전문 소견 (bullet 포함)
+            for line in crtes_r.summaryLines[1:3]:
+                if line:
+                    content_lines.append(f"• {line}")
+
+            content = "\n".join(content_lines)
             self._set_cell_text_with_font(cell, content, font_size=10)
         else:
             self._set_cell_text_with_font(cell, "검사 결과가 없습니다.", font_size=10)
@@ -591,6 +519,12 @@ class CounselRequestDocxFiller:
         SDQ-A는 2개 셀로 분리:
         - Cell 0: 강점 (사회지향 행동 관련) - 3줄
         - Cell 1: 난점 (외현화, 내현화) - 3줄
+
+        summaryLines 포맷 (6줄):
+        - 1줄: 강점 점수 "X/10점" (bullet 없음)
+        - 2-3줄: 강점 소견 (bullet 포함)
+        - 4줄: 난점 점수 "X/40점" (bullet 없음)
+        - 5-6줄: 난점 소견 (bullet 포함)
         """
         if len(table.rows) <= 7:
             return
@@ -600,20 +534,32 @@ class CounselRequestDocxFiller:
 
         # SDQ-A 요약은 6줄: 앞 3줄은 강점, 뒤 3줄은 난점
         if sdq_a and sdq_a.summaryLines and len(sdq_a.summaryLines) >= 6:
-            # 강점 (첫 3줄)
+            # 강점 (첫 3줄): 첫 줄은 점수, 나머지는 소견
             if len(row.cells) > 0:
-                strengths_content = "\n".join(
-                    f"• {line}" for line in sdq_a.summaryLines[:3]
-                )
+                strength_lines: list[str] = []
+                # 첫 줄: 점수 (bullet 없음)
+                strength_lines.append(sdq_a.summaryLines[0])
+                # 2-3줄: 소견 (bullet 포함)
+                for line in sdq_a.summaryLines[1:3]:
+                    if line:
+                        strength_lines.append(f"• {line}")
+
+                strengths_content = "\n".join(strength_lines)
                 self._set_cell_text_with_font(row.cells[0], strengths_content, font_size=10)
                 for para in row.cells[0].paragraphs:
                     para.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
-            # 난점 (뒤 3줄)
+            # 난점 (뒤 3줄): 첫 줄은 점수, 나머지는 소견
             if len(row.cells) > 1:
-                difficulties_content = "\n".join(
-                    f"• {line}" for line in sdq_a.summaryLines[3:6]
-                )
+                difficulty_lines: list[str] = []
+                # 첫 줄: 점수 (bullet 없음)
+                difficulty_lines.append(sdq_a.summaryLines[3])
+                # 2-3줄: 소견 (bullet 포함)
+                for line in sdq_a.summaryLines[4:6]:
+                    if line:
+                        difficulty_lines.append(f"• {line}")
+
+                difficulties_content = "\n".join(difficulty_lines)
                 self._set_cell_text_with_font(row.cells[1], difficulties_content, font_size=10)
                 for para in row.cells[1].paragraphs:
                     para.alignment = WD_ALIGN_PARAGRAPH.LEFT
