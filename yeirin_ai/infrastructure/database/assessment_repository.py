@@ -5,7 +5,8 @@ Soul-E의 검사 데이터를 조회하는 Repository입니다.
 
 from uuid import UUID
 
-import structlog
+import logging
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,7 +18,7 @@ from yeirin_ai.infrastructure.database.soul_e_models import (
     TScoreExtractionStatus,
 )
 
-logger = structlog.get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class AssessmentRepository:

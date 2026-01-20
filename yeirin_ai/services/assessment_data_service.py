@@ -6,12 +6,12 @@ MSA 요청 데이터가 불완전할 경우 DB에서 직접 조회하여 보완�
 
 from dataclasses import dataclass
 
-import structlog
+import logging
 
 from yeirin_ai.infrastructure.database.assessment_repository import AssessmentRepository
 from yeirin_ai.infrastructure.database.soul_e_connection import SoulEAsyncSessionLocal
 
-logger = structlog.get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 @dataclass
