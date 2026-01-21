@@ -453,7 +453,7 @@ class CounselRequestDocxFiller:
         """Row 2: KPRC 검사 소견을 채웁니다.
 
         summaryLines 포맷 (3줄):
-        - 1줄: 바우처 조건 ("바우처 추천 대상: ANX 72T" 또는 "이 아동은 바우처 추천대상자는 아닙니다.")
+        - 1줄: 바우처 조건 (스킵 - 통합 소견 마지막에 표시)
         - 2-3줄: T점수 기반 전문 소견 (bullet point)
         """
         if len(table.rows) <= 2:
@@ -462,13 +462,11 @@ class CounselRequestDocxFiller:
         cell = table.rows[2].cells[0]
         kprc = request.get_kprc_summary_for_doc()
 
-        if kprc and kprc.summaryLines and len(kprc.summaryLines) >= 1:
+        if kprc and kprc.summaryLines and len(kprc.summaryLines) >= 2:
             content_lines: list[str] = []
 
-            # 첫 줄: 바우처 조건 라인 (bullet 없음)
-            content_lines.append(kprc.summaryLines[0])
-
-            # 2-3줄: 전문 소견 (bullet 포함)
+            # 첫 줄(바우처 조건)은 스킵하고 2-3줄 전문 소견만 표시
+            # (바우처 추천 여부는 통합 소견 섹션 마지막에 표시됨)
             for line in kprc.summaryLines[1:3]:
                 if line:
                     content_lines.append(f"• {line}")
