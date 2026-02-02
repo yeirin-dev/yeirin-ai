@@ -1243,7 +1243,7 @@ class IntegratedReportService:
                 eligible_assessments.append("KPRC")
 
         # 2. SDQ-A 판별
-        # 기준: 강점 ≤4점 (level 2 이상) OR 난점 ≥17점 (level 2 이상)
+        # 기준: 강점 ≤4점 (level 2 이상) OR 난점 ≥16점 (level 2 이상)
         sdq_a_eligible: bool | None = None
         sdq_a_reason: str | None = None
 
@@ -1253,8 +1253,8 @@ class IntegratedReportService:
 
             # 강점이 낮을수록 위험 (≤4점이 level 2 이상)
             strength_risk = strength_score is not None and strength_score <= 4
-            # 난점이 높을수록 위험 (≥17점이 level 2 이상)
-            difficulty_risk = difficulty_score is not None and difficulty_score >= 17
+            # 난점이 높을수록 위험 (≥16점이 level 2 이상)
+            difficulty_risk = difficulty_score is not None and difficulty_score >= 16
 
             if strength_risk or difficulty_risk:
                 sdq_a_eligible = True
@@ -1262,7 +1262,7 @@ class IntegratedReportService:
                 if strength_risk:
                     reasons.append(f"강점 {strength_score}점 (≤4)")
                 if difficulty_risk:
-                    reasons.append(f"난점 {difficulty_score}점 (≥17)")
+                    reasons.append(f"난점 {difficulty_score}점 (≥16)")
                 sdq_a_reason = ", ".join(reasons)
                 eligible_assessments.append("SDQ_A")
             else:
